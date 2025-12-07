@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Rakko Workplace</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            fontFamily: {
+              serif: ['Cinzel', 'serif'],
+              sans: ['Inter', 'sans-serif'],
+            },
+            colors: {
+              glass: {
+                panel: 'var(--glass-panel)',
+                border: 'var(--glass-border)',
+                text: 'var(--text-primary)',
+                textMuted: 'var(--text-muted)',
+                bg: 'var(--bg-main)',
+              }
+            },
+            animation: {
+              'fade-in': 'fadeIn 0.2s ease-out',
+              'slide-up': 'slideUp 0.4s cubic-bezier(0.2, 0.9, 0.2, 1) forwards',
+              'pop': 'pop 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)',
+            },
+            keyframes: {
+              fadeIn: {
+                '0%': { opacity: '0', transform: 'scale(0.95)' },
+                '100%': { opacity: '1', transform: 'scale(1)' },
+              },
+              slideUp: {
+                '0%': { opacity: '0', transform: 'translateY(20px) scale(0.95)' },
+                '100%': { opacity: '1', transform: 'translateY(0) scale(1)' },
+              },
+              pop: {
+                '0%': { opacity: '0', transform: 'scale(0.5)' },
+                '100%': { opacity: '1', transform: 'scale(1)' },
+              }
+            }
+          }
+        }
+      }
+    </script>
+    <style>
+      :root {
+        /* Default Dark Mode */
+        --glass-panel: rgba(15, 15, 20, 0.75);
+        --glass-border: rgba(255, 255, 255, 0.1);
+        --text-primary: #f3f4f6;
+        --text-muted: #9ca3af;
+        --bg-main: #000;
+        --window-chrome: rgba(10, 10, 15, 0.95);
+      }
+
+      .light-mode {
+        /* Light Mode */
+        --glass-panel: rgba(255, 255, 255, 0.85);
+        --glass-border: rgba(0, 0, 0, 0.1);
+        --text-primary: #1f2937;
+        --text-muted: #4b5563;
+        --bg-main: #e5e7eb;
+        --window-chrome: rgba(245, 245, 245, 0.95);
+      }
+
+      body { margin: 0; overflow: hidden; background-color: var(--bg-main); transition: background-color 0.3s; }
+      
+      /* Custom Scrollbar */
+      ::-webkit-scrollbar { width: 6px; height: 6px; }
+      ::-webkit-scrollbar-track { background: rgba(0,0,0,0.05); }
+      ::-webkit-scrollbar-thumb { background: var(--glass-border); border-radius: 3px; }
+      ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+      /* Drag Highlight */
+      .drag-active {
+        background-color: rgba(99, 102, 241, 0.1) !important;
+        border: 2px dashed #6366f1 !important;
+      }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react/": "https://aistudiocdn.com/react@^19.2.1/",
+    "react": "https://aistudiocdn.com/react@^19.2.1",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.1/",
+    "lucide-react": "https://aistudiocdn.com/lucide-react@^0.556.0",
+    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.31.0",
+    "react-dom": "https://aistudiocdn.com/react-dom@^19.2.1"
+  }
+}
+</script>
+</head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>
