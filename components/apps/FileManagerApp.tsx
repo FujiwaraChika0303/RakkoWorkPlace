@@ -238,7 +238,7 @@ export const FileManagerApp: React.FC<FileManagerProps> = ({ onOpenFile }) => {
           return;
       }
 
-      const droppedFiles = Array.from(e.dataTransfer.files);
+      const droppedFiles = Array.from(e.dataTransfer.files) as File[];
       for (const file of droppedFiles) {
           const reader = new FileReader();
           
