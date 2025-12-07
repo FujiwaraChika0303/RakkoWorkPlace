@@ -1,3 +1,11 @@
+import React from 'react';
+
+// Feature temporarily disabled
+export const ButlerChat: React.FC = () => {
+  return <div>Feature Disabled</div>;
+};
+
+/*
 import React, { useState, useRef, useEffect } from 'react';
 import { Send, Sparkles, User, Loader2 } from 'lucide-react';
 import { sendMessageToGemini } from '../../services/geminiService';
@@ -135,3 +143,4 @@ export const ButlerChat: React.FC = () => {
     </div>
   );
 };
+*/

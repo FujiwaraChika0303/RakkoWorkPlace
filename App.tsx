@@ -5,7 +5,7 @@ import { StartMenu } from './components/ui/StartMenu';
 import { Taskbar } from './components/ui/Taskbar';
 import { TaskView } from './components/ui/TaskView';
 import { AppId, WindowState, SystemSettings, UserProfile } from './types';
-import { ButlerChat } from './components/apps/ButlerChat';
+// import { ButlerChat } from './components/apps/ButlerChat';
 import { GalleryApp } from './components/apps/GalleryApp';
 import { AboutApp } from './components/apps/AboutApp';
 import { PictureViewerApp } from './components/apps/PictureViewerApp';
@@ -16,7 +16,7 @@ import { fsService } from './services/fileSystemService';
 
 // --- APP REGISTRY ---
 const INSTALLED_APPS = [
-  { id: AppId.CHAT, label: 'Rakko AI Assistant', icon: <MessageSquare size={20} className="text-indigo-400" /> },
+  // { id: AppId.CHAT, label: 'Rakko AI Assistant', icon: <MessageSquare size={20} className="text-indigo-400" /> },
   { id: AppId.FILE_MANAGER, label: 'File Manager', icon: <Folder size={20} className="text-yellow-400" /> },
   { id: AppId.TEXT_EDITOR, label: 'Text Editor', icon: <FileText size={20} className="text-emerald-400" /> },
   { id: AppId.GALLERY, label: 'Gallery', icon: <ImageIcon size={20} className="text-purple-400" /> },
@@ -163,7 +163,7 @@ const App: React.FC = () => {
 
   const renderAppContent = (id: AppId, data?: any) => {
     switch (id) {
-      case AppId.CHAT: return <ButlerChat />;
+      // case AppId.CHAT: return <ButlerChat />;
       case AppId.GALLERY: 
         return <GalleryApp onOpenImage={(url, title) => openApp(AppId.PICTURE_VIEWER, { url, title })} />;
       case AppId.ABOUT: return <AboutApp />;
