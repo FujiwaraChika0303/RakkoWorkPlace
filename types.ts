@@ -8,7 +8,8 @@ export enum AppId {
   PICTURE_VIEWER = 'picture_viewer',
   FILE_MANAGER = 'file_manager',
   CONTROL_PANEL = 'control_panel',
-  TEXT_EDITOR = 'text_editor'
+  TEXT_EDITOR = 'text_editor',
+  HELP = 'help'
 }
 
 export interface AppConfig {

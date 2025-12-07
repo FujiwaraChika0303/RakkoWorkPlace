@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { MessageSquare, Image as ImageIcon, Info, Hexagon, Settings, Folder, FileText, Sun, Moon } from 'lucide-react';
+import { MessageSquare, Image as ImageIcon, Info, Hexagon, Settings, Folder, FileText, Sun, Moon, HelpCircle } from 'lucide-react';
 import { Window } from './components/ui/Window';
 import { StartMenu } from './components/ui/StartMenu';
 import { Taskbar } from './components/ui/Taskbar';
@@ -12,11 +12,13 @@ import { PictureViewerApp } from './components/apps/PictureViewerApp';
 import { FileManagerApp } from './components/apps/FileManagerApp';
 import { ControlPanelApp } from './components/apps/ControlPanelApp';
 import { TextEditorApp } from './components/apps/TextEditorApp';
+import { HelpApp } from './components/apps/HelpApp';
 import { fsService } from './services/fileSystemService';
 
 // --- APP REGISTRY ---
 const INSTALLED_APPS = [
   // { id: AppId.CHAT, label: 'Rakko AI Assistant', icon: <MessageSquare size={20} className="text-indigo-400" /> },
+  { id: AppId.HELP, label: 'Help Center', icon: <HelpCircle size={20} className="text-orange-400" /> },
   { id: AppId.FILE_MANAGER, label: 'File Manager', icon: <Folder size={20} className="text-yellow-400" /> },
   { id: AppId.TEXT_EDITOR, label: 'Text Editor', icon: <FileText size={20} className="text-emerald-400" /> },
   { id: AppId.GALLERY, label: 'Gallery', icon: <ImageIcon size={20} className="text-purple-400" /> },
@@ -33,6 +35,7 @@ const INITIAL_WINDOWS: Record<AppId, WindowState> = {
   [AppId.FILE_MANAGER]: { id: AppId.FILE_MANAGER, isOpen: false, isMinimized: false, zIndex: 1, position: { x: 120, y: 120 }, desktopId: 0 },
   [AppId.CONTROL_PANEL]: { id: AppId.CONTROL_PANEL, isOpen: false, isMinimized: false, zIndex: 1, position: { x: 180, y: 180 }, desktopId: 0 },
   [AppId.TEXT_EDITOR]: { id: AppId.TEXT_EDITOR, isOpen: false, isMinimized: false, zIndex: 1, position: { x: 220, y: 150 }, desktopId: 0 },
+  [AppId.HELP]: { id: AppId.HELP, isOpen: false, isMinimized: false, zIndex: 1, position: { x: 80, y: 80 }, desktopId: 0 },
 };
 
 const App: React.FC = () => {
@@ -167,6 +170,7 @@ const App: React.FC = () => {
       case AppId.GALLERY: 
         return <GalleryApp onOpenImage={(url, title) => openApp(AppId.PICTURE_VIEWER, { url, title })} />;
       case AppId.ABOUT: return <AboutApp />;
+      case AppId.HELP: return <HelpApp />;
       case AppId.PICTURE_VIEWER: 
         return <PictureViewerApp initialImage={data?.url} initialTitle={data?.title} />;
       case AppId.FILE_MANAGER:
