@@ -4,7 +4,7 @@ import { Window } from './components/ui/Window';
 import { StartMenu } from './components/ui/StartMenu';
 import { Taskbar } from './components/ui/Taskbar';
 import { TaskView } from './components/ui/TaskView';
-import { AppId, WindowState, SystemSettings, UserProfile } from './types';
+import { AppId, WindowState, SystemSettings, UserProfile, FileSystemItem } from './types';
 // import { ButlerChat } from './components/apps/ButlerChat';
 import { GalleryApp } from './components/apps/GalleryApp';
 import { AboutApp } from './components/apps/AboutApp';
@@ -22,7 +22,6 @@ const INSTALLED_APPS = [
   { id: AppId.FILE_MANAGER, label: 'File Manager', icon: <Folder size={20} className="text-yellow-400" /> },
   { id: AppId.TEXT_EDITOR, label: 'Text Editor', icon: <FileText size={20} className="text-emerald-400" /> },
   { id: AppId.GALLERY, label: 'Gallery', icon: <ImageIcon size={20} className="text-purple-400" /> },
-  { id: AppId.PICTURE_VIEWER, label: 'Picture Viewer', icon: <ImageIcon size={20} className="text-pink-400" /> },
   { id: AppId.CONTROL_PANEL, label: 'Control Panel', icon: <Settings size={20} className="text-gray-400" /> },
   { id: AppId.ABOUT, label: 'About Rakko', icon: <Info size={20} className="text-blue-400" /> },
 ];
@@ -48,6 +47,22 @@ const App: React.FC = () => {
   // New States for Task View & Desktops
   const [isTaskViewOpen, setIsTaskViewOpen] = useState(false);
   const [currentDesktop, setCurrentDesktop] = useState(0); // 0 or 1
+
+  // Desktop Files State
+  const [desktopFiles, setDesktopFiles] = useState<FileSystemItem[]>([]);
+
+  // --- Desktop Icons State ---
+  const [iconPositions, setIconPositions] = useState<Record<string, {x: number, y: number}>>(() => {
+    // Initialize icons in a grid/column
+    const pos: Record<string, {x: number, y: number}> = {};
+    INSTALLED_APPS.forEach((app, idx) => {
+      pos[app.id] = { x: 32, y: 32 + idx * 104 }; 
+    });
+    return pos;
+  });
+  
+  // Drag Over state for Desktop Background Drop
+  const [isDragOverDesktop, setIsDragOverDesktop] = useState(false);
 
   // --- Global System State ---
   const [settings, setSettings] = useState<SystemSettings>({
@@ -79,6 +94,59 @@ const App: React.FC = () => {
     }
     localStorage.setItem('theme', settings.theme);
   }, [settings.theme]);
+
+  // Load Desktop Files
+  const loadDesktopFiles = () => {
+    const files = fsService.getDirectory('/C/Desktop');
+    setDesktopFiles([...files]);
+  };
+
+  useEffect(() => {
+    loadDesktopFiles();
+    const handleUpdate = () => loadDesktopFiles();
+    window.addEventListener('fs-update', handleUpdate);
+    return () => window.removeEventListener('fs-update', handleUpdate);
+  }, []);
+
+  // Calculate Unified Desktop Items (Apps + Files)
+  const allDesktopItems = [
+    ...INSTALLED_APPS.map(app => ({ type: 'app', id: app.id, label: app.label, icon: app.icon })),
+    ...desktopFiles.map(file => ({ 
+        type: 'file', 
+        id: `file:${file.name}`, 
+        label: file.name, 
+        icon: file.type === 'folder' 
+            ? <Folder size={28} className="text-yellow-400" />
+            : file.fileType === 'image' 
+                ? <ImageIcon size={28} className="text-purple-400" />
+                : <FileText size={28} className="text-blue-400" />,
+        data: file
+    }))
+  ];
+
+  // Assign Default Positions for new files
+  useEffect(() => {
+      setIconPositions(prev => {
+          const newPos = { ...prev };
+          let hasChanges = false;
+          let fileIndex = INSTALLED_APPS.length; // Start placing files after apps
+          
+          allDesktopItems.forEach((item, idx) => {
+              if (!newPos[item.id]) {
+                  // Simple grid placement logic
+                  const col = Math.floor(idx / 6);
+                  const row = idx % 6;
+                  newPos[item.id] = { 
+                      x: 32 + col * 100, 
+                      y: 32 + row * 104 
+                  };
+                  hasChanges = true;
+              }
+          });
+          return hasChanges ? newPos : prev;
+      });
+  }, [allDesktopItems.length]);
+
 
   const toggleTheme = () => {
       setSettings(prev => ({ ...prev, theme: prev.theme === 'dark' ? 'light' : 'dark' }));
@@ -165,6 +233,87 @@ const App: React.FC = () => {
     }
   };
 
+  // --- Desktop Drop Logic (Handles Uploads & Moves) ---
+  const handleDragOverDesktop = (e: React.DragEvent) => {
+      e.preventDefault();
+      // Only highlight if valid types
+      if (e.dataTransfer.types.includes('Files') || e.dataTransfer.types.includes('application/rakko-item')) {
+          setIsDragOverDesktop(true);
+      }
+  };
+
+  const handleDragLeaveDesktop = () => {
+      setIsDragOverDesktop(false);
+  };
+
+  const handleDropOnDesktop = (e: React.DragEvent) => {
+      e.preventDefault();
+      setIsDragOverDesktop(false);
+
+      // 1. Internal Item Move
+      const rakkoData = e.dataTransfer.getData('application/rakko-item');
+      if (rakkoData) {
+          try {
+              const { name, path: sourcePath, type } = JSON.parse(rakkoData);
+              if (type === 'rakko-file') {
+                if (sourcePath === '/C/Desktop') {
+                   // Rearrange on Desktop - Update Icon Position
+                   // We use e.clientX/Y to update position
+                   // Note: 'name' here corresponds to file name, need to find ID
+                   const id = `file:${name}`;
+                   setIconPositions(prev => ({
+                       ...prev,
+                       [id]: { x: e.clientX - 32, y: e.clientY - 32 } // Center on mouse roughly
+                   }));
+                } else {
+                   // Move from Folder to Desktop
+                   fsService.moveFile(sourcePath, '/C/Desktop', name);
+                }
+              }
+          } catch (e) { console.error(e); }
+          return;
+      }
+
+      // 2. External File Upload
+      if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+          const files = Array.from(e.dataTransfer.files) as File[];
+          const uploadPath = '/C/Desktop'; 
+          
+          files.forEach(file => {
+              const reader = new FileReader();
+              if (file.type.startsWith('image/')) {
+                  reader.readAsDataURL(file);
+                  reader.onload = () => {
+                      try {
+                          fsService.createFile(uploadPath, file.name, 'file', '', reader.result as string);
+                      } catch(e) { console.error(e); }
+                  };
+              } else {
+                  reader.readAsText(file);
+                  reader.onload = () => {
+                      try {
+                          fsService.createFile(uploadPath, file.name, 'file', reader.result as string);
+                      } catch(e) { console.error(e); }
+                  };
+              }
+          });
+      }
+  };
+
+  const handleIconDragStart = (e: React.DragEvent, item: any) => {
+      if (item.type === 'file') {
+          const dragData = JSON.stringify({
+             name: item.data.name,
+             path: '/C/Desktop',
+             type: 'rakko-file'
+          });
+          e.dataTransfer.setData('application/rakko-item', dragData);
+          e.dataTransfer.effectAllowed = 'move';
+      } else {
+         e.preventDefault(); // Apps aren't draggable to file system currently
+      }
+  };
+
   const renderAppContent = (id: AppId, data?: any) => {
     switch (id) {
       // case AppId.CHAT: return <ButlerChat />;
@@ -207,31 +356,64 @@ const App: React.FC = () => {
   };
 
   return (
-    <div 
-      className="relative w-screen h-screen overflow-hidden bg-cover bg-center select-none font-sans transition-all duration-700 ease-in-out"
-      style={{ 
-        backgroundImage: `url('${settings.wallpaper}')`,
-      }}
-    >
-      <div className="absolute inset-0 bg-glass-bg/20 pointer-events-none" />
+    <div className="relative w-screen h-screen overflow-hidden select-none font-sans bg-black">
+      
+      {/* Desktop Background Layer (Drop Zone) */}
+      <div 
+        className="absolute inset-0 z-0 bg-cover bg-center transition-all duration-700 ease-in-out"
+        style={{ 
+          backgroundImage: `url('${settings.wallpaper}')`,
+        }}
+        onDragOver={handleDragOverDesktop}
+        onDragLeave={handleDragLeaveDesktop}
+        onDrop={handleDropOnDesktop}
+      >
+          <div className="absolute inset-0 bg-glass-bg/20 pointer-events-none" />
+          
+          {/* Subtle Drop Highlight */}
+          {isDragOverDesktop && (
+              <div className="absolute inset-0 border-4 border-indigo-500/50 bg-indigo-500/10 transition-all pointer-events-none" />
+          )}
 
-      {/* Desktop Icons */}
-      <div className="absolute top-8 left-8 flex flex-col gap-6 z-0">
-        {INSTALLED_APPS.map(app => (
-            <DesktopIcon 
-                key={app.id}
-                label={app.label} 
-                icon={app.icon} 
-                onClick={() => openApp(app.id)} 
-                accentColor={settings.accentColor}
-            />
-        ))}
+          {/* Desktop Icons */}
+          {allDesktopItems.map(item => (
+              <div
+                  key={item.id}
+                  style={{
+                      position: 'absolute',
+                      left: iconPositions[item.id]?.x || 32,
+                      top: iconPositions[item.id]?.y || 32,
+                      touchAction: 'none'
+                  }}
+                  draggable={item.type === 'file'}
+                  onDragStart={(e) => handleIconDragStart(e, item)}
+              >
+                  <DesktopIcon 
+                      label={item.label} 
+                      icon={item.icon} 
+                      onClick={() => {
+                          if (item.type === 'app') openApp(item.id as AppId);
+                          else if (item.type === 'file') {
+                             const f = item.data;
+                             if (f.fileType === 'image' && f.url) {
+                                openApp(AppId.PICTURE_VIEWER, { url: f.url, title: f.name });
+                             } else if (f.fileType === 'text') {
+                                openApp(AppId.TEXT_EDITOR, { initialPath: '/C/Desktop', initialFileName: f.name });
+                             } else if (f.type === 'folder') {
+                                // TODO: Open folder in FM (Navigate to /C/Desktop/Folder)
+                                openApp(AppId.FILE_MANAGER); 
+                             }
+                          }
+                      }} 
+                      accentColor={settings.accentColor}
+                  />
+              </div>
+          ))}
       </div>
 
-      {/* Windows */}
+      {/* Windows Layer (z-1+) */}
       {(Object.values(windows) as WindowState[]).map(windowState => {
           const isOnCurrentDesktop = windowState.desktopId === currentDesktop;
-          
           return (
             <div key={windowState.id} style={{ display: isOnCurrentDesktop ? 'block' : 'none' }}>
                 <Window
@@ -311,12 +493,12 @@ const App: React.FC = () => {
 const DesktopIcon: React.FC<{ label: string; icon: React.ReactNode; onClick: () => void; accentColor: string }> = ({ label, icon, onClick, accentColor }) => (
   <button 
     onClick={onClick}
-    className="group flex flex-col items-center gap-2 w-24 p-2 rounded-lg hover:bg-white/10 transition-colors focus:outline-none focus:bg-white/20"
+    className="group flex flex-col items-center gap-2 w-24 p-2 rounded-lg hover:bg-white/10 transition-colors focus:outline-none focus:bg-white/20 cursor-default"
   >
-    <div className={`w-14 h-14 rounded-xl bg-glass-panel flex items-center justify-center shadow-lg border border-glass-border group-hover:scale-105 transition-transform duration-200 text-${accentColor}-400 group-hover:text-${accentColor}-300`}>
+    <div className={`w-14 h-14 rounded-xl bg-glass-panel flex items-center justify-center shadow-lg border border-glass-border group-hover:scale-105 transition-transform duration-200 text-${accentColor}-400 group-hover:text-${accentColor}-300 cursor-pointer`}>
       {React.isValidElement(icon) ? React.cloneElement(icon as React.ReactElement<any>, { size: 28 }) : icon}
     </div>
-    <span className="text-white text-xs font-medium text-shadow-sm bg-black/40 px-2 py-0.5 rounded-full backdrop-blur-sm border border-transparent group-hover:border-white/10">
+    <span className="text-white text-xs font-medium text-shadow-sm bg-black/40 px-2 py-0.5 rounded-full backdrop-blur-sm border border-transparent group-hover:border-white/10 cursor-pointer break-all text-center leading-tight">
       {label}
     </span>
   </button>

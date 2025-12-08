@@ -35,12 +35,14 @@ type FileSystemState = Record<string, FileSystemItem[]>;
 const INITIAL_C_DRIVE: FileSystemState = {
   '/C': [
     { name: 'Documents', type: 'folder', date: new Date().toISOString().split('T')[0] },
+    { name: 'Desktop', type: 'folder', date: new Date().toISOString().split('T')[0] },
     { name: 'Users', type: 'folder', date: new Date().toISOString().split('T')[0] },
   ],
   '/C/Documents': [
     { name: 'Welcome.txt', type: 'file', fileType: 'text', size: '1 KB', date: new Date().toISOString().split('T')[0], content: 'Welcome to your local C Drive!\nYou can edit this file.' },
     { name: 'Todo.txt', type: 'file', fileType: 'text', size: '1 KB', date: new Date().toISOString().split('T')[0], content: '- Buy milk\n- Update Rakko OS' },
   ],
+  '/C/Desktop': [],
   '/C/Users': []
 };
 
@@ -49,6 +51,10 @@ class FileSystemService {
 
   constructor() {
     this.cDrive = this.loadCDrive();
+    // Ensure Desktop exists for legacy data
+    if (!this.cDrive['/C/Desktop']) {
+      this.cDrive['/C/Desktop'] = [];
+    }
   }
 
   private loadCDrive(): FileSystemState {
@@ -206,6 +212,7 @@ class FileSystemService {
   }
 
   public moveFile(sourcePath: string, destPath: string, fileName: string): void {
+      if (sourcePath === destPath) return; // Same directory
       // Basic Copy + Delete
       this.copyFile(sourcePath, destPath, fileName);
       this.deleteFile(sourcePath, fileName);
@@ -214,7 +221,7 @@ class FileSystemService {
   public copyFile(sourcePath: string, destPath: string, fileName: string): void {
       // 1. Get Source
       let sourceDir: FileSystemItem[] = [];
-      if (sourcePath.startsWith('/C')) sourceDir = this.cDrive[sourcePath];
+      if (sourcePath.startsWith('/C')) sourceDir = this.cDrive[sourcePath] || [];
       else if (SYSTEM_FILES[sourcePath]) sourceDir = SYSTEM_FILES[sourcePath];
       else throw new Error("Source path not found");
 

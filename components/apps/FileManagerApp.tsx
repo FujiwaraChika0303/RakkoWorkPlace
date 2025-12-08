@@ -5,7 +5,7 @@ import {
   Image as ImageIcon, Search, Grid, List as ListIcon, 
   HardDrive, ChevronRight, Plus, Trash2, RefreshCw,
   MoreVertical, Copy, Scissors, Clipboard, Edit3, Eye, Download, Info, X, SlidersHorizontal,
-  Code, Music, Video, Box
+  Code, Music, Video, Box, Monitor
 } from 'lucide-react';
 import { fsService } from '../../services/fileSystemService';
 import { FileSystemItem, FileClipboard } from '../../types';
@@ -75,6 +75,8 @@ export const FileManagerApp: React.FC<FileManagerProps> = ({ onOpenFile }) => {
   const [history, setHistory] = useState<string[]>(['/']);
   const [historyIndex, setHistoryIndex] = useState(0);
   const [currentPath, setCurrentPath] = useState('/');
+  // New Feature: Breadcrumb mode instead of plain text
+  const [isEditingAddress, setIsEditingAddress] = useState(false);
   const [addressInput, setAddressInput] = useState('/');
 
   // Data & View
@@ -96,10 +98,13 @@ export const FileManagerApp: React.FC<FileManagerProps> = ({ onOpenFile }) => {
   const [newItemName, setNewItemName] = useState('');
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
+  // Drag & Drop
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
+  const [isDragOver, setIsDragOver] = useState(false);
+
   // UI State
   const [contextMenu, setContextMenu] = useState<{x: number, y: number, item?: string} | null>(null);
   const [showProperties, setShowProperties] = useState<FileSystemItem | null>(null);
-  const [isDragOver, setIsDragOver] = useState(false);
 
   // Helper to load files with new reference to trigger render
   const loadFiles = (path: string) => {
@@ -144,6 +149,7 @@ export const FileManagerApp: React.FC<FileManagerProps> = ({ onOpenFile }) => {
     newHistory.push(path);
     setHistory(newHistory);
     setHistoryIndex(newHistory.length - 1);
+    setIsEditingAddress(false);
   };
 
   const handleBack = () => historyIndex > 0 && setHistoryIndex(historyIndex - 1);
@@ -215,7 +221,7 @@ export const FileManagerApp: React.FC<FileManagerProps> = ({ onOpenFile }) => {
       setRefreshTrigger(prev => prev + 1);
   };
 
-  // --- Download & Upload ---
+  // --- Download ---
   const handleDownload = (item: FileSystemItem) => {
     const content = item.content || '';
     const blob = new Blob([content], { type: 'text/plain' });
@@ -229,35 +235,88 @@ export const FileManagerApp: React.FC<FileManagerProps> = ({ onOpenFile }) => {
     if (!item.url) URL.revokeObjectURL(url);
   };
 
-  const handleDrop = async (e: React.DragEvent) => {
+  // --- Drag & Drop (Unified Logic) ---
+
+  const handleInternalDragStart = (e: React.DragEvent, fileName: string) => {
+    // Serialize drag data to support cross-directory/window moves
+    const dragData = JSON.stringify({
+        name: fileName,
+        path: currentPath,
+        type: 'rakko-file'
+    });
+    e.dataTransfer.setData('application/rakko-item', dragData);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleGlobalDrop = async (e: React.DragEvent, targetPath?: string) => {
       e.preventDefault();
+      e.stopPropagation(); // Prevent Desktop from handling this
       setIsDragOver(false);
-      
-      if (!currentPath.startsWith('/C')) {
-          alert("Cannot upload to Read-only folder.");
+      setDropTarget(null);
+
+      const destPath = targetPath || currentPath;
+
+      // 1. Handle Internal Move (from FM or Desktop)
+      const rakkoData = e.dataTransfer.getData('application/rakko-item');
+      if (rakkoData) {
+          try {
+              const { name, path: sourcePath } = JSON.parse(rakkoData);
+              if (sourcePath === destPath) return; // Same folder drop
+
+              if (!destPath.startsWith('/C')) {
+                  alert("Destination is Read-Only.");
+                  return;
+              }
+              
+              // Prevent moving folder into itself
+              if (destPath.startsWith(`${sourcePath}/${name}`)) {
+                  alert("Cannot move folder into itself.");
+                  return;
+              }
+
+              fsService.moveFile(sourcePath, destPath, name);
+          } catch (err) {
+              console.error("Invalid Drag Data", err);
+          }
           return;
       }
 
-      const droppedFiles = Array.from(e.dataTransfer.files) as File[];
-      for (const file of droppedFiles) {
-          const reader = new FileReader();
-          
-          if (file.type.startsWith('image/')) {
-              reader.readAsDataURL(file);
-              reader.onload = () => {
-                  try {
-                      fsService.createFile(currentPath, file.name, 'file', '', reader.result as string);
-                  } catch (e: any) { console.error(e); }
-              };
-          } else {
-              reader.readAsText(file);
-              reader.onload = () => {
-                  try {
-                      fsService.createFile(currentPath, file.name, 'file', reader.result as string);
-                  } catch (e: any) { console.error(e); }
-              };
+      // 2. Handle External Upload (Files from OS)
+      if (e.dataTransfer.files.length > 0) {
+          if (!destPath.startsWith('/C')) {
+              alert("Cannot upload to Read-Only folder.");
+              return;
+          }
+
+          const uploadedFiles = Array.from(e.dataTransfer.files) as File[];
+          for (const file of uploadedFiles) {
+              const reader = new FileReader();
+              
+              if (file.type.startsWith('image/')) {
+                  reader.readAsDataURL(file);
+                  reader.onload = () => {
+                      try {
+                          fsService.createFile(destPath, file.name, 'file', '', reader.result as string);
+                      } catch (e: any) { console.error(e); }
+                  };
+              } else {
+                  reader.readAsText(file);
+                  reader.onload = () => {
+                      try {
+                          fsService.createFile(destPath, file.name, 'file', reader.result as string);
+                      } catch (e: any) { console.error(e); }
+                  };
+              }
           }
       }
+  };
+
+  const handleDragOverItem = (e: React.DragEvent, targetName: string, isFolder: boolean) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!isFolder) return;
+      // Visual Feedback
+      if (dropTarget !== targetName) setDropTarget(targetName);
   };
 
   // --- Selection Logic ---
@@ -314,9 +373,9 @@ export const FileManagerApp: React.FC<FileManagerProps> = ({ onOpenFile }) => {
   return (
     <div 
         className="h-full flex flex-col bg-glass-panel text-glass-text font-sans select-none relative"
-        onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
-        onDragLeave={() => setIsDragOver(false)}
-        onDrop={handleDrop}
+        onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragOver(true); }}
+        onDragLeave={() => { setIsDragOver(false); setDropTarget(null); }}
+        onDrop={(e) => handleGlobalDrop(e)}
         onContextMenu={(e) => handleContextMenu(e)}
     >
       {/* 1. Header & Navigation */}
@@ -335,16 +394,48 @@ export const FileManagerApp: React.FC<FileManagerProps> = ({ onOpenFile }) => {
           </button>
         </div>
 
-        <form onSubmit={(e) => { e.preventDefault(); navigateTo(addressInput); }} className="flex-1 flex items-center bg-black/20 border border-glass-border rounded-lg px-3 py-1.5 focus-within:border-indigo-500/50 focus-within:bg-black/40 transition-all shadow-inner">
-          <HardDrive size={14} className="text-indigo-400 mr-2" />
-          <input 
-            className="flex-1 bg-transparent border-none outline-none text-sm text-glass-text placeholder-glass-textMuted font-mono"
-            value={addressInput}
-            onChange={(e) => setAddressInput(e.target.value)}
-          />
-        </form>
+        {/* Improved Breadcrumb Address Bar */}
+        <div className="flex-1 flex items-center bg-black/20 border border-glass-border rounded-lg px-2 py-1.5 focus-within:border-indigo-500/50 focus-within:bg-black/40 transition-all shadow-inner h-9 overflow-hidden">
+          <HardDrive size={14} className="text-indigo-400 mr-2 shrink-0" />
+          
+          {isEditingAddress ? (
+            <form onSubmit={(e) => { e.preventDefault(); navigateTo(addressInput); }} className="w-full">
+                <input 
+                    autoFocus
+                    className="w-full bg-transparent border-none outline-none text-sm text-glass-text placeholder-glass-textMuted font-mono"
+                    value={addressInput}
+                    onChange={(e) => setAddressInput(e.target.value)}
+                    onBlur={() => setIsEditingAddress(false)}
+                />
+            </form>
+          ) : (
+            <div 
+                className="flex items-center flex-1 h-full cursor-text" 
+                onClick={() => setIsEditingAddress(true)}
+            >
+                {currentPath === '/' ? (
+                    <button className="px-1 hover:bg-white/10 rounded text-sm font-medium">Root</button>
+                ) : (
+                    currentPath.split('/').filter(Boolean).map((part, idx, arr) => {
+                        const pathSoFar = '/' + arr.slice(0, idx + 1).join('/');
+                        return (
+                            <React.Fragment key={pathSoFar}>
+                                <span className="text-gray-500 mx-0.5">/</span>
+                                <button 
+                                    onClick={(e) => { e.stopPropagation(); navigateTo(pathSoFar); }}
+                                    className="px-1.5 hover:bg-white/10 rounded text-sm transition-colors text-gray-200 hover:text-white truncate max-w-[120px]"
+                                >
+                                    {part}
+                                </button>
+                            </React.Fragment>
+                        );
+                    })
+                )}
+            </div>
+          )}
+        </div>
 
-        <div className="flex items-center bg-black/20 border border-glass-border rounded-full px-3 py-1.5 w-48 focus-within:w-64 transition-all shadow-inner">
+        <div className="flex items-center bg-black/20 border border-glass-border rounded-full px-3 py-1.5 w-48 focus-within:w-64 transition-all shadow-inner h-9">
           <Search size={14} className="text-glass-textMuted mr-2" />
           <input 
             type="text" 
@@ -382,12 +473,12 @@ export const FileManagerApp: React.FC<FileManagerProps> = ({ onOpenFile }) => {
       {/* 3. Main Content Split */}
       <div className="flex-1 flex overflow-hidden relative">
           
-          {/* Drag Overlay */}
-          {isDragOver && (
+          {/* Drag Overlay for External Upload */}
+          {isDragOver && !dropTarget && (
               <div className="absolute inset-0 z-50 bg-indigo-500/20 backdrop-blur-sm flex items-center justify-center border-2 border-indigo-500 border-dashed m-4 rounded-xl pointer-events-none animate-pulse">
                   <div className="bg-glass-panel p-6 rounded-2xl shadow-2xl flex flex-col items-center">
                       <Download size={48} className="text-indigo-400 mb-4" />
-                      <span className="text-xl font-bold">Drop files to upload</span>
+                      <span className="text-xl font-bold">Drop files to move/upload</span>
                   </div>
               </div>
           )}
@@ -395,16 +486,35 @@ export const FileManagerApp: React.FC<FileManagerProps> = ({ onOpenFile }) => {
           {/* Sidebar */}
           <div className="w-52 bg-glass-bg/20 border-r border-glass-border flex flex-col py-4 shrink-0 hidden md:flex backdrop-blur-sm">
              <div className="text-[10px] font-bold text-glass-textMuted uppercase tracking-widest px-4 mb-2">Locations</div>
-             <SidebarItem icon={<Home size={16} />} label="Home" active={currentPath === '/'} onClick={() => navigateTo('/')} />
-             <SidebarItem icon={<HardDrive size={16} />} label="Local Drive (C:)" active={currentPath.startsWith('/C')} onClick={() => navigateTo('/C')} />
-             <SidebarItem icon={<Grid size={16} />} label="System" active={currentPath.startsWith('/System')} onClick={() => navigateTo('/System')} />
+             <SidebarItem 
+                icon={<Home size={16} />} label="Home" active={currentPath === '/'} 
+                path="/" onClick={() => navigateTo('/')} onDropFile={handleGlobalDrop}
+             />
+             <SidebarItem 
+                icon={<Monitor size={16} />} label="Desktop" active={currentPath.startsWith('/C/Desktop')} 
+                path="/C/Desktop" onClick={() => navigateTo('/C/Desktop')} onDropFile={handleGlobalDrop}
+             />
+             <SidebarItem 
+                icon={<HardDrive size={16} />} label="Local Drive (C:)" active={currentPath.startsWith('/C') && !currentPath.startsWith('/C/')} 
+                path="/C" onClick={() => navigateTo('/C')} onDropFile={handleGlobalDrop}
+             />
+             <SidebarItem 
+                icon={<Grid size={16} />} label="System" active={currentPath.startsWith('/System')} 
+                path="/System" onClick={() => navigateTo('/System')} onDropFile={handleGlobalDrop}
+             />
              
              <div className="text-[10px] font-bold text-glass-textMuted uppercase tracking-widest px-4 mb-2 mt-6">Favorites</div>
-             <SidebarItem icon={<ImageIcon size={16} />} label="Pictures" active={currentPath.includes('Picture')} onClick={() => navigateTo('/MyDocument/Picture')} />
-             <SidebarItem icon={<FileText size={16} />} label="Documents" active={currentPath.includes('Documents')} onClick={() => navigateTo('/C/Documents')} />
+             <SidebarItem 
+                icon={<ImageIcon size={16} />} label="Pictures" active={currentPath.includes('Picture')} 
+                path="/MyDocument/Picture" onClick={() => navigateTo('/MyDocument/Picture')} onDropFile={handleGlobalDrop}
+             />
+             <SidebarItem 
+                icon={<FileText size={16} />} label="Documents" active={currentPath.includes('Documents')} 
+                path="/C/Documents" onClick={() => navigateTo('/C/Documents')} onDropFile={handleGlobalDrop}
+             />
 
              <div className="mt-auto px-4 py-2 text-[10px] text-glass-textMuted text-center opacity-50">
-                 Rakko Explorer v3.0
+                 Rakko Explorer v3.1
              </div>
           </div>
 
@@ -439,10 +549,19 @@ export const FileManagerApp: React.FC<FileManagerProps> = ({ onOpenFile }) => {
                 {processedFiles.map((item, idx) => {
                     const isSelected = selectedItems.has(item.name);
                     const isRenaming = renamingItem === item.name;
+                    const isTarget = dropTarget === item.name;
 
                     return (
                         <div 
                         key={`${item.name}-${idx}`}
+                        draggable={canWrite}
+                        onDragStart={(e) => handleInternalDragStart(e, item.name)}
+                        onDragOver={(e) => handleDragOverItem(e, item.name, item.type === 'folder')}
+                        onDrop={(e) => {
+                            if (item.type === 'folder') {
+                                handleGlobalDrop(e, `${currentPath === '/' ? '' : currentPath}/${item.name}`);
+                            }
+                        }}
                         style={{ 
                             animationDelay: `${idx * 0.03}s` // Staggered delay
                         }}
@@ -455,8 +574,14 @@ export const FileManagerApp: React.FC<FileManagerProps> = ({ onOpenFile }) => {
                         className={`
                             group relative flex cursor-pointer select-none animate-slide-up
                             ${viewMode === 'grid' 
-                            ? `flex-col items-center p-3 rounded-2xl border transition-all duration-200 ${isSelected ? 'bg-indigo-500/20 border-indigo-500/50 shadow-[0_0_15px_rgba(99,102,241,0.3)]' : 'border-transparent hover:bg-white/5 hover:border-white/10'}` 
-                            : `flex-row items-center px-4 py-3 rounded-lg border-b border-transparent hover:bg-white/5 ${isSelected ? 'bg-indigo-500/20 border-indigo-500/30' : ''}`
+                            ? `flex-col items-center p-3 rounded-2xl border transition-all duration-200 
+                               ${isSelected ? 'bg-indigo-500/20 border-indigo-500/50 shadow-[0_0_15px_rgba(99,102,241,0.3)]' : 'border-transparent hover:bg-white/5 hover:border-white/10'}
+                               ${isTarget ? 'bg-indigo-500/40 scale-105 border-indigo-400 border-2 border-dashed' : ''}
+                              ` 
+                            : `flex-row items-center px-4 py-3 rounded-lg border-b border-transparent hover:bg-white/5 
+                               ${isSelected ? 'bg-indigo-500/20 border-indigo-500/30' : ''}
+                               ${isTarget ? 'bg-indigo-500/40 border-indigo-400 border-dashed' : ''}
+                              `
                             }
                         `}
                         >
@@ -634,13 +759,32 @@ export const FileManagerApp: React.FC<FileManagerProps> = ({ onOpenFile }) => {
   );
 };
 
-const SidebarItem = ({ icon, label, active, onClick }: any) => (
-  <button 
-    onClick={onClick}
-    className={`flex items-center gap-3 px-4 py-2 mx-2 rounded-lg text-sm transition-all duration-200 group relative overflow-hidden ${active ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/20' : 'text-gray-400 hover:bg-white/5 hover:text-white'}`}
-  >
-    <div className={`relative z-10 transition-transform duration-300 ${active ? 'scale-110' : 'group-hover:scale-110'}`}>{icon}</div>
-    <span className="relative z-10 font-medium">{label}</span>
-    {active && <div className="absolute inset-0 bg-gradient-to-r from-indigo-500 to-indigo-600 z-0"></div>}
-  </button>
-);
+const SidebarItem = ({ icon, label, active, path, onClick, onDropFile }: any) => {
+    const [isDragOver, setIsDragOver] = useState(false);
+
+    return (
+        <button 
+            onClick={onClick}
+            onDragOver={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setIsDragOver(true);
+            }}
+            onDragLeave={() => setIsDragOver(false)}
+            onDrop={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (path && onDropFile) onDropFile(e, path);
+                setIsDragOver(false);
+            }}
+            className={`flex items-center gap-3 px-4 py-2 mx-2 rounded-lg text-sm transition-all duration-200 group relative overflow-hidden 
+                ${active ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/20' : 'text-gray-400 hover:bg-white/5 hover:text-white'}
+                ${isDragOver ? 'bg-indigo-500/40 ring-2 ring-indigo-400 scale-105 z-10' : ''}
+            `}
+        >
+            <div className={`relative z-10 transition-transform duration-300 ${active ? 'scale-110' : 'group-hover:scale-110'}`}>{icon}</div>
+            <span className="relative z-10 font-medium">{label}</span>
+            {active && <div className="absolute inset-0 bg-gradient-to-r from-indigo-500 to-indigo-600 z-0"></div>}
+        </button>
+    );
+};
