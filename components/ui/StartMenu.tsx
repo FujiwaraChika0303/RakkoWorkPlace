@@ -16,9 +16,10 @@ interface StartMenuProps {
   onShutdown: () => void;
   onClose: () => void;
   position?: 'top' | 'bottom';
+  onAppContextMenu?: (e: React.MouseEvent, id: AppId) => void;
 }
 
-export const StartMenu: React.FC<StartMenuProps> = ({ isOpen, user, apps, onOpenApp, onShutdown, onClose, position = 'bottom' }) => {
+export const StartMenu: React.FC<StartMenuProps> = ({ isOpen, user, apps, onOpenApp, onShutdown, onClose, position = 'bottom', onAppContextMenu }) => {
   if (!isOpen) return null;
 
   const positionClass = position === 'top' 
@@ -55,6 +56,11 @@ export const StartMenu: React.FC<StartMenuProps> = ({ isOpen, user, apps, onOpen
               onClick={() => {
                 onOpenApp(app.id);
                 onClose();
+              }}
+              onContextMenu={(e) => {
+                  if (onAppContextMenu) {
+                      onAppContextMenu(e, app.id);
+                  }
               }}
               className="w-full text-left px-3 py-2.5 rounded-lg hover:bg-white/10 flex items-center gap-4 transition-all duration-200 text-gray-200 group border border-transparent hover:border-white/5"
             >

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { X, Minus, Maximize2, Minimize2 } from 'lucide-react';
 import { AppId } from '../../types';
+import html2canvas from 'html2canvas';
 
 interface WindowProps {
   id: AppId;
@@ -14,6 +15,7 @@ interface WindowProps {
   onClose: (id: AppId) => void;
   onMinimize: (id: AppId) => void;
   onFocus: (id: AppId) => void;
+  onUpdatePreview: (id: AppId, url: string) => void;
   children: React.ReactNode;
 }
 
@@ -29,6 +31,7 @@ export const Window: React.FC<WindowProps> = ({
   onClose,
   onMinimize,
   onFocus,
+  onUpdatePreview,
   children,
 }) => {
   // --- Window State ---
@@ -46,10 +49,12 @@ export const Window: React.FC<WindowProps> = ({
   const [isResizing, setIsResizing] = useState(false);
 
   // --- Refs ---
+  const windowRef = useRef<HTMLDivElement>(null);
   const dragStartMouse = useRef({ x: 0, y: 0 });
   const dragStartPos = useRef({ x: 0, y: 0 });
   const dragStartSize = useRef({ width: 0, height: 0 });
   const resizeDir = useRef('');
+  const lastCaptureTime = useRef(0);
 
   // Entrance/Exit/Minimize Animation Logic
   useEffect(() => {
@@ -81,6 +86,57 @@ export const Window: React.FC<WindowProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
 
+  // Capture Screenshot Logic
+  const capturePreview = async () => {
+    if (!windowRef.current || isMinimized || !isOpen) return;
+    
+    // Throttle captures
+    const now = Date.now();
+    if (now - lastCaptureTime.current < 1000) return;
+    lastCaptureTime.current = now;
+
+    try {
+        const element = windowRef.current;
+        const canvas = await html2canvas(element, {
+            useCORS: true,
+            backgroundColor: null, 
+            scale: 0.5, // Downscale for performance
+            logging: false,
+            // Explicitly set capture dimensions to the element's size
+            width: element.offsetWidth,
+            height: element.offsetHeight,
+            // Reset coordinate context
+            x: 0,
+            y: 0,
+            // Critical: Reset positioning and transforms in the clone so we capture 
+            // the window as if it were at (0,0) without interference from CSS transforms.
+            onclone: (clonedDoc) => {
+                const clonedNode = clonedDoc.querySelector(`[data-window-id="${id}"]`) as HTMLElement;
+                if (clonedNode) {
+                    clonedNode.style.transform = 'none';
+                    clonedNode.style.position = 'fixed';
+                    clonedNode.style.top = '0px';
+                    clonedNode.style.left = '0px';
+                    clonedNode.style.margin = '0px';
+                    clonedNode.style.transition = 'none';
+                }
+            },
+            ignoreElements: (element) => element.classList.contains('no-capture')
+        });
+        onUpdatePreview(id, canvas.toDataURL('image/png'));
+    } catch (e) {
+        console.warn("Failed to capture window preview", e);
+    }
+  };
+
+  // Capture on Blur (when window becomes inactive)
+  useEffect(() => {
+      if (!isActive && isOpen && !isMinimized && isVisible) {
+          capturePreview();
+      }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isActive]);
+
   // --- Handlers ---
 
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -91,6 +147,13 @@ export const Window: React.FC<WindowProps> = ({
     setIsDragging(true);
     dragStartMouse.current = { x: e.clientX, y: e.clientY };
     dragStartPos.current = { ...position };
+  };
+
+  const handleMinimize = async (e: React.MouseEvent) => {
+      e.stopPropagation();
+      // Capture before minimizing (async)
+      await capturePreview();
+      onMinimize(id);
   };
 
   const toggleMaximize = () => {
@@ -175,18 +238,13 @@ export const Window: React.FC<WindowProps> = ({
   let opacityValue = 1;
 
   if (isMinimized) {
-    // Drop to bottom center (mimic taskbar) and scale down
-    // We assume taskbar is roughly at Y = window.innerHeight
-    // We keep X but move Y down
     transformString = `translate(${renderX}px, ${window.innerHeight}px) scale(0.3)`;
     opacityValue = 0;
   } else if (!isVisible) {
-    // Initial opening / Closing state
     transformString = `translate(${renderX}px, ${renderY}px) scale(0.9)`;
     opacityValue = 0;
   }
 
-  // Disable CSS transitions during drag/resize for instant feedback
   const isInteracting = isDragging || isResizing;
   const transitionClass = isInteracting 
     ? 'transition-none' 
@@ -194,6 +252,8 @@ export const Window: React.FC<WindowProps> = ({
 
   return (
     <div
+      ref={windowRef}
+      data-window-id={id}
       style={{
         position: 'absolute',
         zIndex,
@@ -201,7 +261,6 @@ export const Window: React.FC<WindowProps> = ({
         height: renderHeight,
         transform: transformString,
         opacity: opacityValue,
-        // Add blur when minimized for extra style
         filter: isMinimized ? 'blur(10px)' : 'none',
         pointerEvents: isMinimized ? 'none' : 'auto'
       }}
@@ -230,7 +289,7 @@ export const Window: React.FC<WindowProps> = ({
         </span>
         <div className="flex items-center gap-2 window-controls">
           <button
-            onClick={(e) => { e.stopPropagation(); onMinimize(id); }}
+            onClick={handleMinimize}
             className="p-1 hover:bg-white/10 rounded-md text-gray-400 hover:text-white transition-colors"
           >
             <Minus size={14} />
@@ -257,7 +316,7 @@ export const Window: React.FC<WindowProps> = ({
 
       {/* Resize Handles (Only when not maximized) */}
       {!isMaximized && (
-        <>
+        <div className="no-capture">
           {/* Right Edge */}
           <div 
             className="absolute right-0 top-0 bottom-4 w-1.5 cursor-e-resize hover:bg-white/10 transition-colors z-50"
@@ -273,7 +332,7 @@ export const Window: React.FC<WindowProps> = ({
             className="absolute right-0 bottom-0 w-4 h-4 cursor-se-resize hover:bg-white/20 transition-colors z-50 rounded-tl-lg"
             onMouseDown={startResize('se')}
           />
-        </>
+        </div>
       )}
     </div>
   );

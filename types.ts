@@ -29,6 +29,7 @@ export interface WindowState {
   position: { x: number; y: number };
   data?: any;
   desktopId: number; // 0 or 1
+  previewUrl?: string; // Data URL of the window screenshot
 }
 
 export interface ChatMessage {
@@ -74,4 +75,15 @@ export interface FileSystemItem {
 export interface FileClipboard {
   type: 'copy' | 'cut';
   items: { path: string, name: string }[];
+}
+
+// New Interface for Context Menu
+export interface MenuItem {
+  label: string;
+  icon?: ReactNode;
+  action?: () => void;
+  disabled?: boolean;
+  danger?: boolean;
+  separator?: boolean;
+  // Simple submenu support could be added here, but keeping flat for now
 }

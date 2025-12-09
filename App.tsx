@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { MessageSquare, Image as ImageIcon, Info, Hexagon, Settings, Folder, FileText, Sun, Moon, HelpCircle, Monitor, Grid, Type, Calendar, HardDrive, Plus, RefreshCw, Check, Trash2, X, Maximize2, Edit3, ExternalLink } from 'lucide-react';
+import { MessageSquare, Image as ImageIcon, Info, Hexagon, Settings, Folder, FileText, Sun, Moon, HelpCircle, Monitor, Grid, Type, Calendar, HardDrive, Plus, RefreshCw, Check, Trash2, X, Maximize2, Edit3, ExternalLink, Pin, PinOff } from 'lucide-react';
 import { Window } from './components/ui/Window';
 import { StartMenu } from './components/ui/StartMenu';
 import { Taskbar } from './components/ui/Taskbar';
 import { TaskView } from './components/ui/TaskView';
-import { AppId, WindowState, SystemSettings, UserProfile, FileSystemItem } from './types';
+import { ContextMenu } from './components/ui/ContextMenu';
+import { AppId, WindowState, SystemSettings, UserProfile, FileSystemItem, MenuItem } from './types';
 // import { ButlerChat } from './components/apps/ButlerChat';
 import { GalleryApp } from './components/apps/GalleryApp';
 import { AboutApp } from './components/apps/AboutApp';
@@ -19,10 +20,11 @@ import { fsService } from './services/fileSystemService';
 // --- APP REGISTRY ---
 const INSTALLED_APPS = [
   // { id: AppId.CHAT, label: 'Rakko AI Assistant', icon: <MessageSquare size={20} className="text-indigo-400" /> },
+  { id: AppId.PICTURE_VIEWER, label: 'Picture Studio', icon: <ImageIcon size={20} className="text-pink-400" /> },
   { id: AppId.HELP, label: 'Help Center', icon: <HelpCircle size={20} className="text-orange-400" /> },
   { id: AppId.FILE_MANAGER, label: 'File Manager', icon: <Folder size={20} className="text-yellow-400" /> },
   { id: AppId.TEXT_EDITOR, label: 'Text Editor', icon: <FileText size={20} className="text-emerald-400" /> },
-  { id: AppId.GALLERY, label: 'Gallery', icon: <ImageIcon size={20} className="text-purple-400" /> },
+  { id: AppId.GALLERY, label: 'Gallery', icon: <Grid size={20} className="text-purple-400" /> },
   { id: AppId.CONTROL_PANEL, label: 'Control Panel', icon: <Settings size={20} className="text-gray-400" /> },
   { id: AppId.ABOUT, label: 'About Rakko', icon: <Info size={20} className="text-blue-400" /> },
 ];
@@ -59,10 +61,25 @@ const App: React.FC = () => {
   const [iconSize, setIconSize] = useState<IconSize>('medium');
   const [sortOption, setSortOption] = useState<SortOption>('name');
   const [iconPositions, setIconPositions] = useState<Record<string, {x: number, y: number}>>({});
+  
+  // Taskbar Pinned Apps State
+  const [pinnedAppIds, setPinnedAppIds] = useState<AppId[]>(() => {
+    const saved = localStorage.getItem('rakko_pinned_apps');
+    if (saved) {
+        try { return JSON.parse(saved); } catch { return []; }
+    }
+    // Defaults
+    return [AppId.FILE_MANAGER, AppId.TEXT_EDITOR, AppId.PICTURE_VIEWER];
+  });
 
-  // Context Menu State
-  const [desktopContextMenu, setDesktopContextMenu] = useState<{x: number, y: number} | null>(null);
-  const [iconContextMenu, setIconContextMenu] = useState<{x: number, y: number, item: any} | null>(null);
+  // Context Menu State (Unified)
+  const [activeContextMenu, setActiveContextMenu] = useState<{
+      type: 'desktop' | 'icon' | 'taskbar' | 'start';
+      x: number;
+      y: number;
+      data?: any;
+  } | null>(null);
+
   const [renamingItemId, setRenamingItemId] = useState<string | null>(null);
   const [renameInput, setRenameInput] = useState('');
   
@@ -107,6 +124,11 @@ const App: React.FC = () => {
     }
     localStorage.setItem('theme', settings.theme);
   }, [settings.theme]);
+
+  // Save Pinned Apps
+  useEffect(() => {
+      localStorage.setItem('rakko_pinned_apps', JSON.stringify(pinnedAppIds));
+  }, [pinnedAppIds]);
 
   // Load Desktop Files
   const loadDesktopFiles = () => {
@@ -249,6 +271,13 @@ const App: React.FC = () => {
     if (activeApp === id) setActiveApp(null);
   };
 
+  const handleUpdatePreview = (id: AppId, url: string) => {
+      setWindows(prev => ({
+          ...prev,
+          [id]: { ...prev[id], previewUrl: url }
+      }));
+  };
+
   const moveWindowToDesktop = (id: AppId, desktopId: number) => {
     setWindows(prev => ({
         ...prev,
@@ -275,21 +304,41 @@ const App: React.FC = () => {
     }
   };
 
+  // --- Pinning Logic ---
+  const togglePinApp = (id: AppId) => {
+      setPinnedAppIds(prev => {
+          if (prev.includes(id)) return prev.filter(p => p !== id);
+          return [...prev, id];
+      });
+  };
+
+  const isAppPinned = (id: AppId) => pinnedAppIds.includes(id);
+
   // --- Context Menu Handlers ---
   const handleDesktopContextMenu = (e: React.MouseEvent) => {
       e.preventDefault();
       // Ensure we aren't clicking on an icon (bubbling is stopped there usually, but safety check)
       if ((e.target as HTMLElement).closest('.desktop-icon')) return;
       
-      setDesktopContextMenu({ x: e.clientX, y: e.clientY });
-      setIconContextMenu(null);
+      setActiveContextMenu({ type: 'desktop', x: e.clientX, y: e.clientY });
   };
   
   const handleIconContextMenu = (e: React.MouseEvent, item: any) => {
       e.preventDefault();
       e.stopPropagation();
-      setIconContextMenu({ x: e.clientX, y: e.clientY, item });
-      setDesktopContextMenu(null);
+      setActiveContextMenu({ type: 'icon', x: e.clientX, y: e.clientY, data: item });
+  };
+
+  const handleTaskbarContextMenu = (e: React.MouseEvent, appId: AppId) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setActiveContextMenu({ type: 'taskbar', x: e.clientX, y: e.clientY, data: { id: appId }});
+  };
+
+  const handleStartMenuContextMenu = (e: React.MouseEvent, appId: AppId) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setActiveContextMenu({ type: 'start', x: e.clientX, y: e.clientY, data: { id: appId }});
   };
 
   const handleCreateNew = (type: 'folder' | 'text') => {
@@ -303,7 +352,7 @@ const App: React.FC = () => {
       } catch (e) {
           console.error(e);
       }
-      setDesktopContextMenu(null);
+      setActiveContextMenu(null);
   };
   
   const handleDeleteIcon = (item: any) => {
@@ -312,7 +361,7 @@ const App: React.FC = () => {
               fsService.deleteFile('/C/Desktop', item.data.name);
           }
       }
-      setIconContextMenu(null);
+      setActiveContextMenu(null);
   };
   
   const handleRenameIcon = (item: any) => {
@@ -320,7 +369,7 @@ const App: React.FC = () => {
           setRenamingItemId(item.id);
           setRenameInput(item.label);
       }
-      setIconContextMenu(null);
+      setActiveContextMenu(null);
   };
   
   const submitRename = () => {
@@ -480,14 +529,110 @@ const App: React.FC = () => {
   };
 
   const getWindowTitle = (windowState: WindowState) => {
-    if (windowState.id === AppId.PICTURE_VIEWER && windowState.data?.title) {
-      return `Viewer - ${windowState.data.title}`;
+    if (windowState.id === AppId.PICTURE_VIEWER) {
+      return `Picture Studio${windowState.data?.title ? ` - ${windowState.data.title}` : ''}`;
     }
     if (windowState.id === AppId.TEXT_EDITOR && windowState.data?.initialFileName) {
         return `Editor - ${windowState.data.initialFileName}`;
     }
     const appDef = INSTALLED_APPS.find(a => a.id === windowState.id);
     return appDef ? appDef.label : windowState.id;
+  };
+
+  // --- Context Menu Generation ---
+  const renderContextMenu = () => {
+    if (!activeContextMenu) return null;
+
+    let items: MenuItem[] = [];
+
+    // 1. Desktop Background Menu
+    if (activeContextMenu.type === 'desktop') {
+        return null; // Handled by legacy portal below
+    }
+
+    // 2. Icon Menu (Desktop Icons)
+    if (activeContextMenu.type === 'icon') {
+        const item = activeContextMenu.data;
+        items = [
+            { 
+                label: 'Open', 
+                icon: <Maximize2 size={14}/>, 
+                action: () => handleOpenItem(item) 
+            },
+            { separator: true } as MenuItem
+        ];
+
+        // Pinning Option for Apps
+        if (item.type === 'app') {
+            const pinned = isAppPinned(item.id);
+            items.push({
+                label: pinned ? 'Unpin from Taskbar' : 'Pin to Taskbar',
+                icon: pinned ? <PinOff size={14}/> : <Pin size={14}/>,
+                action: () => togglePinApp(item.id)
+            });
+            items.push({ separator: true } as MenuItem);
+        }
+
+        // File Operations
+        if (item.type === 'file') {
+             items.push(
+                { label: 'Rename', icon: <Edit3 size={14}/>, action: () => handleRenameIcon(item) },
+                { label: 'Delete', icon: <Trash2 size={14}/>, danger: true, action: () => handleDeleteIcon(item) }
+             );
+        }
+    }
+
+    // 3. Taskbar Menu
+    if (activeContextMenu.type === 'taskbar') {
+        const { id } = activeContextMenu.data;
+        const pinned = isAppPinned(id);
+        const isOpen = windows[id].isOpen;
+        
+        items = [
+            {
+                label: pinned ? 'Unpin from Taskbar' : 'Pin to Taskbar',
+                icon: pinned ? <PinOff size={14}/> : <Pin size={14}/>,
+                action: () => togglePinApp(id)
+            },
+            { separator: true } as MenuItem,
+            {
+                label: 'Close Window',
+                icon: <X size={14}/>,
+                disabled: !isOpen,
+                danger: true,
+                action: () => closeApp(id)
+            }
+        ];
+    }
+
+    // 4. Start Menu Item Context
+    if (activeContextMenu.type === 'start') {
+        const { id } = activeContextMenu.data;
+        const pinned = isAppPinned(id);
+        
+        items = [
+             {
+                label: 'Open',
+                icon: <Maximize2 size={14}/>,
+                action: () => openApp(id)
+            },
+            { separator: true } as MenuItem,
+            {
+                label: pinned ? 'Unpin from Taskbar' : 'Pin to Taskbar',
+                icon: pinned ? <PinOff size={14}/> : <Pin size={14}/>,
+                action: () => togglePinApp(id)
+            }
+        ];
+    }
+
+    return (
+        <ContextMenu
+            x={activeContextMenu.x}
+            y={activeContextMenu.y}
+            items={items}
+            onClose={() => setActiveContextMenu(null)}
+        />
+    );
   };
 
   return (
@@ -553,20 +698,19 @@ const App: React.FC = () => {
           ))}
       </div>
 
-      {/* Desktop Context Menu Portal */}
-      {desktopContextMenu && createPortal(
+      {/* Legacy Desktop Background Context Menu (Kept for Submenu support) */}
+      {activeContextMenu?.type === 'desktop' && createPortal(
           <>
-            {/* Backdrop to close menu on click outside */}
             <div 
                 className="fixed inset-0 z-[9998]" 
-                onClick={() => setDesktopContextMenu(null)}
-                onContextMenu={(e) => { e.preventDefault(); setDesktopContextMenu(null); }}
+                onClick={() => setActiveContextMenu(null)}
+                onContextMenu={(e) => { e.preventDefault(); setActiveContextMenu(null); }}
             />
             <div 
                 className="fixed z-[9999] min-w-[200px] bg-glass-panel backdrop-blur-xl border border-glass-border rounded-lg shadow-[0_10px_40px_rgba(0,0,0,0.5)] py-1.5 animate-pop flex flex-col text-sm text-glass-text origin-top-left"
                 style={{ 
-                    top: Math.min(desktopContextMenu.y, window.innerHeight - 320), 
-                    left: Math.min(desktopContextMenu.x, window.innerWidth - 220) 
+                    top: Math.min(activeContextMenu.y, window.innerHeight - 320), 
+                    left: Math.min(activeContextMenu.x, window.innerWidth - 220) 
                 }}
                 onClick={(e) => e.stopPropagation()}
                 onContextMenu={(e) => e.preventDefault()}
@@ -579,13 +723,13 @@ const App: React.FC = () => {
                     </button>
                     {/* Nested Menu */}
                     <div className="absolute left-full top-0 ml-1 w-40 bg-glass-panel backdrop-blur-xl border border-glass-border rounded-lg shadow-xl py-1 hidden group-hover/item:block animate-fade-in">
-                        <button onClick={() => { setIconSize('large'); setDesktopContextMenu(null); }} className="w-full text-left px-3 py-2 hover:bg-indigo-600/80 hover:text-white flex items-center gap-2">
+                        <button onClick={() => { setIconSize('large'); setActiveContextMenu(null); }} className="w-full text-left px-3 py-2 hover:bg-indigo-600/80 hover:text-white flex items-center gap-2">
                             <div className="w-4 flex justify-center">{iconSize === 'large' && <Check size={12}/>}</div> Large Icons
                         </button>
-                        <button onClick={() => { setIconSize('medium'); setDesktopContextMenu(null); }} className="w-full text-left px-3 py-2 hover:bg-indigo-600/80 hover:text-white flex items-center gap-2">
+                        <button onClick={() => { setIconSize('medium'); setActiveContextMenu(null); }} className="w-full text-left px-3 py-2 hover:bg-indigo-600/80 hover:text-white flex items-center gap-2">
                             <div className="w-4 flex justify-center">{iconSize === 'medium' && <Check size={12}/>}</div> Medium Icons
                         </button>
-                        <button onClick={() => { setIconSize('small'); setDesktopContextMenu(null); }} className="w-full text-left px-3 py-2 hover:bg-indigo-600/80 hover:text-white flex items-center gap-2">
+                        <button onClick={() => { setIconSize('small'); setActiveContextMenu(null); }} className="w-full text-left px-3 py-2 hover:bg-indigo-600/80 hover:text-white flex items-center gap-2">
                             <div className="w-4 flex justify-center">{iconSize === 'small' && <Check size={12}/>}</div> Small Icons
                         </button>
                     </div>
@@ -598,13 +742,13 @@ const App: React.FC = () => {
                         <span className="text-[10px]">▶</span>
                     </button>
                     <div className="absolute left-full top-0 ml-1 w-40 bg-glass-panel backdrop-blur-xl border border-glass-border rounded-lg shadow-xl py-1 hidden group-hover/item:block animate-fade-in">
-                        <button onClick={() => { setSortOption('name'); setDesktopContextMenu(null); }} className="w-full text-left px-3 py-2 hover:bg-indigo-600/80 hover:text-white flex items-center gap-2">
+                        <button onClick={() => { setSortOption('name'); setActiveContextMenu(null); }} className="w-full text-left px-3 py-2 hover:bg-indigo-600/80 hover:text-white flex items-center gap-2">
                             <div className="w-4 flex justify-center">{sortOption === 'name' && <Check size={12}/>}</div> Name
                         </button>
-                        <button onClick={() => { setSortOption('size'); setDesktopContextMenu(null); }} className="w-full text-left px-3 py-2 hover:bg-indigo-600/80 hover:text-white flex items-center gap-2">
+                        <button onClick={() => { setSortOption('size'); setActiveContextMenu(null); }} className="w-full text-left px-3 py-2 hover:bg-indigo-600/80 hover:text-white flex items-center gap-2">
                             <div className="w-4 flex justify-center">{sortOption === 'size' && <Check size={12}/>}</div> Size
                         </button>
-                        <button onClick={() => { setSortOption('date'); setDesktopContextMenu(null); }} className="w-full text-left px-3 py-2 hover:bg-indigo-600/80 hover:text-white flex items-center gap-2">
+                        <button onClick={() => { setSortOption('date'); setActiveContextMenu(null); }} className="w-full text-left px-3 py-2 hover:bg-indigo-600/80 hover:text-white flex items-center gap-2">
                             <div className="w-4 flex justify-center">{sortOption === 'date' && <Check size={12}/>}</div> Date
                         </button>
                     </div>
@@ -612,7 +756,7 @@ const App: React.FC = () => {
 
                 <div className="h-px bg-white/10 my-1 mx-2" />
 
-                <button onClick={() => { loadDesktopFiles(); setDesktopContextMenu(null); }} className="text-left px-4 py-2 hover:bg-indigo-600/80 hover:text-white flex items-center gap-3 transition-colors mx-1 rounded">
+                <button onClick={() => { loadDesktopFiles(); setActiveContextMenu(null); }} className="text-left px-4 py-2 hover:bg-indigo-600/80 hover:text-white flex items-center gap-3 transition-colors mx-1 rounded">
                     <RefreshCw size={14} className="opacity-70"/> Refresh
                 </button>
 
@@ -635,7 +779,7 @@ const App: React.FC = () => {
 
                 <div className="h-px bg-white/10 my-1 mx-2" />
 
-                <button onClick={() => { openApp(AppId.CONTROL_PANEL); setDesktopContextMenu(null); }} className="text-left px-4 py-2 hover:bg-indigo-600/80 hover:text-white flex items-center gap-3 transition-colors mx-1 rounded">
+                <button onClick={() => { openApp(AppId.CONTROL_PANEL); setActiveContextMenu(null); }} className="text-left px-4 py-2 hover:bg-indigo-600/80 hover:text-white flex items-center gap-3 transition-colors mx-1 rounded">
                     <Settings size={14} className="opacity-70"/> Personalize
                 </button>
             </div>
@@ -643,46 +787,8 @@ const App: React.FC = () => {
           document.body
       )}
 
-      {/* Icon Context Menu Portal */}
-      {iconContextMenu && createPortal(
-          <>
-             <div 
-                className="fixed inset-0 z-[9998]" 
-                onClick={() => setIconContextMenu(null)}
-                onContextMenu={(e) => { e.preventDefault(); setIconContextMenu(null); }}
-             />
-             <div 
-                className="fixed z-[9999] min-w-[180px] bg-glass-panel backdrop-blur-xl border border-glass-border rounded-lg shadow-2xl py-1.5 animate-pop flex flex-col text-sm text-glass-text"
-                style={{ 
-                    top: Math.min(iconContextMenu.y, window.innerHeight - 200), 
-                    left: Math.min(iconContextMenu.x, window.innerWidth - 180) 
-                }}
-                onClick={(e) => e.stopPropagation()}
-                onContextMenu={(e) => e.preventDefault()}
-             >
-                <div className="px-4 py-1.5 mb-1 text-xs text-glass-textMuted font-bold uppercase tracking-wider border-b border-glass-border">
-                    {iconContextMenu.item.label}
-                </div>
-                
-                <button onClick={() => { handleOpenItem(iconContextMenu.item); setIconContextMenu(null); }} className="text-left px-4 py-2 hover:bg-indigo-600/80 hover:text-white flex items-center gap-3 transition-colors mx-1 rounded font-bold">
-                    <Maximize2 size={14} className="opacity-70"/> Open
-                </button>
-                
-                {iconContextMenu.item.type === 'file' && (
-                    <>
-                        <div className="h-px bg-white/10 my-1 mx-2" />
-                        <button onClick={() => handleRenameIcon(iconContextMenu.item)} className="text-left px-4 py-2 hover:bg-indigo-600/80 hover:text-white flex items-center gap-3 transition-colors mx-1 rounded">
-                            <Edit3 size={14} className="opacity-70"/> Rename
-                        </button>
-                        <button onClick={() => handleDeleteIcon(iconContextMenu.item)} className="text-left px-4 py-2 hover:bg-red-600/80 hover:text-white flex items-center gap-3 transition-colors mx-1 rounded text-red-300">
-                            <Trash2 size={14} className="opacity-70"/> Delete
-                        </button>
-                    </>
-                )}
-             </div>
-          </>,
-          document.body
-      )}
+      {/* Render the New Unified Context Menu for other types */}
+      {renderContextMenu()}
 
       {/* Windows Layer (z-1+) */}
       {(Object.values(windows) as WindowState[]).map(windowState => {
@@ -699,7 +805,8 @@ const App: React.FC = () => {
                 onClose={closeApp}
                 onMinimize={minimizeApp}
                 onFocus={bringToFront}
-                initialSize={windowState.id === AppId.CHAT ? { width: 400, height: 600 } : undefined}
+                onUpdatePreview={handleUpdatePreview}
+                initialSize={windowState.id === AppId.PICTURE_VIEWER ? { width: 900, height: 650 } : (windowState.id === AppId.CHAT ? { width: 400, height: 600 } : undefined)}
                 >
                 {renderAppContent(windowState.id, windowState.data)}
                 </Window>
@@ -719,6 +826,7 @@ const App: React.FC = () => {
         }}
         onClose={() => setIsStartMenuOpen(false)}
         position={settings.taskbar.position}
+        onAppContextMenu={handleStartMenuContextMenu}
       />
 
       {/* Task View Overlay */}
@@ -735,6 +843,11 @@ const App: React.FC = () => {
         onSwitchDesktop={setCurrentDesktop}
         onMoveWindowToDesktop={moveWindowToDesktop}
         renderWindowContent={(id) => {
+           // Use screenshot if available for better performance/accuracy
+           const previewUrl = windows[id].previewUrl;
+           if (previewUrl) {
+               return <img src={previewUrl} className="w-full h-full object-contain pointer-events-none" draggable={false} alt="Preview"/>;
+           }
            return (
             <div className="w-full h-full bg-slate-900 text-slate-200 rounded-lg overflow-hidden relative pointer-events-none">
                 {renderAppContent(id, windows[id].data)}
@@ -746,6 +859,7 @@ const App: React.FC = () => {
       {/* Taskbar */}
       <Taskbar 
         installedApps={INSTALLED_APPS}
+        pinnedAppIds={pinnedAppIds}
         openWindows={windows}
         activeApp={activeApp}
         currentDesktop={currentDesktop}
@@ -754,9 +868,15 @@ const App: React.FC = () => {
         isStartMenuOpen={isStartMenuOpen}
         onToggleStartMenu={() => setIsStartMenuOpen(!isStartMenuOpen)}
         onAppClick={handleTaskbarAppClick}
+        onAppContextMenu={handleTaskbarContextMenu}
         onCloseApp={closeApp}
         onToggleTaskView={() => setIsTaskViewOpen(!isTaskViewOpen)}
         onToggleTheme={toggleTheme}
+        renderWindowContent={(id) => (
+             <div className="w-full h-full bg-slate-900 text-slate-200 rounded-lg overflow-hidden relative pointer-events-none">
+                {renderAppContent(id, windows[id].data)}
+            </div>
+        )}
       />
       
     </div>

@@ -68,8 +68,12 @@
         --window-chrome: rgba(245, 245, 245, 0.95);
       }
 
-      body { margin: 0; overflow: hidden; background-color: var(--bg-main); transition: background-color 0.3s; }
+      body { margin: 0; overflow: hidden; background-color: var(--bg-main); transition: background-color 0.3s, filter 0.5s; }
       
+      /* Global Filters for Quick Settings */
+      body.night-light { filter: sepia(0.4) saturate(1.2) !important; }
+      body.reading-mode { filter: grayscale(100%) !important; }
+
       /* Custom Scrollbar */
       ::-webkit-scrollbar { width: 6px; height: 6px; }
       ::-webkit-scrollbar-track { background: rgba(0,0,0,0.05); }
@@ -90,7 +94,8 @@
     "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.1/",
     "lucide-react": "https://aistudiocdn.com/lucide-react@^0.556.0",
     "@google/genai": "https://aistudiocdn.com/@google/genai@^1.31.0",
-    "react-dom": "https://aistudiocdn.com/react-dom@^19.2.1"
+    "react-dom": "https://aistudiocdn.com/react-dom@^19.2.1",
+    "html2canvas": "https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.esm.js"
   }
 }
 </script>
