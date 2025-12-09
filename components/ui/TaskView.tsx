@@ -47,12 +47,6 @@ export const TaskView: React.FC<TaskViewProps> = ({
     }
   }, [isOpen]);
 
-  useEffect(() => {
-    const handleClick = () => setContextMenu(null);
-    window.addEventListener('click', handleClick);
-    return () => window.removeEventListener('click', handleClick);
-  }, []);
-
   if (!shouldRender) return null;
 
   const desktopWindows = windows.filter(w => w.isOpen && w.desktopId === currentDesktop);
@@ -100,6 +94,7 @@ export const TaskView: React.FC<TaskViewProps> = ({
             ${isOpen ? 'opacity-100 scale-100' : 'opacity-0 scale-95 pointer-events-none'}
         `}
         onClick={handleBackdropClick}
+        onContextMenu={(e) => e.preventDefault()}
     >
       <button 
         onClick={onClose}
@@ -225,6 +220,7 @@ export const TaskView: React.FC<TaskViewProps> = ({
              className="fixed z-[100] w-60 bg-[#1a1a1a]/95 backdrop-blur-xl border border-white/10 rounded-xl shadow-[0_20px_60px_rgba(0,0,0,0.7)] py-2 animate-pop origin-top-left flex flex-col"
              style={{ top: contextMenu.y, left: contextMenu.x }}
              onClick={(e) => e.stopPropagation()}
+             onContextMenu={(e) => e.preventDefault()}
           >
              <div className="px-4 py-2 text-[10px] font-bold text-gray-500 uppercase tracking-widest border-b border-white/5 mb-1 flex items-center gap-2">
                 <Layout size={12}/> Window Options
@@ -268,7 +264,7 @@ export const TaskView: React.FC<TaskViewProps> = ({
           </div>
       )}
       
-      {contextMenu && <div className="fixed inset-0 z-[99]" onClick={() => setContextMenu(null)} />}
+      {contextMenu && <div className="fixed inset-0 z-[99]" onClick={() => setContextMenu(null)} onContextMenu={(e) => { e.preventDefault(); setContextMenu(null); }} />}
     </div>
   );
 };

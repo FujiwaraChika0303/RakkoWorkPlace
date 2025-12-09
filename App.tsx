@@ -1,7 +1,6 @@
-
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { MessageSquare, Image as ImageIcon, Info, Hexagon, Settings, Folder, FileText, Sun, Moon, HelpCircle, Monitor, Grid, Type, Calendar, HardDrive, Plus, RefreshCw, Check, Trash2, X, Maximize2, Edit3, ExternalLink, Pin, PinOff, Activity, LayoutTemplate, Box, Globe } from 'lucide-react';
+import { MessageSquare, Image as ImageIcon, Info, Hexagon, Settings, Folder, FileText, Sun, Moon, HelpCircle, Monitor, Grid, Type, Calendar, HardDrive, Plus, RefreshCw, Check, Trash2, X, Maximize2, Edit3, ExternalLink, Pin, PinOff, Activity, LayoutTemplate, Box, Globe, SlidersHorizontal } from 'lucide-react';
 import { Window } from './components/ui/Window';
 import { StartMenu } from './components/ui/StartMenu';
 import { Taskbar } from './components/ui/Taskbar';
@@ -18,12 +17,14 @@ import { HelpApp } from './components/apps/HelpApp';
 import { TaskManagerApp } from './components/apps/TaskManagerApp';
 import { IframeApp } from './components/apps/IframeApp';
 import { BrowserApp } from './components/apps/BrowserApp';
+import { PropertiesApp } from './components/apps/PropertiesApp';
 import { fsService } from './services/fileSystemService';
 import { processRegistry } from './services/processRegistry';
 import { useSystemProcess } from './hooks/useSystemProcess';
 import { scanThirdPartyApps, ThirdPartyAppDefinition } from './services/thirdPartyAppsService';
 
 // --- SYSTEM APP REGISTRY ---
+// Properties removed from here to act as a dialog only
 const SYSTEM_APPS = [
   { id: AppId.BROWSER, label: 'Rakko Browser', icon: <Globe size={20} className="text-sky-400" /> },
   { id: AppId.PICTURE_VIEWER, label: 'Picture Studio', icon: <ImageIcon size={20} className="text-pink-400" /> },
@@ -81,6 +82,7 @@ const App: React.FC = () => {
   // Desktop Configuration State
   const [iconSize, setIconSize] = useState<IconSize>('medium');
   const [sortOption, setSortOption] = useState<SortOption>('name');
+  const [isAutoArrange, setIsAutoArrange] = useState<boolean>(false);
   const [iconPositions, setIconPositions] = useState<Record<string, {x: number, y: number}>>({});
   
   // Taskbar Pinned Apps State
@@ -94,7 +96,7 @@ const App: React.FC = () => {
 
   // Context Menu State (Unified)
   const [activeContextMenu, setActiveContextMenu] = useState<{
-      type: 'desktop' | 'icon' | 'taskbar' | 'start';
+      type: 'desktop' | 'icon' | 'taskbar-icon' | 'taskbar-bg' | 'start';
       x: number;
       y: number;
       data?: any;
@@ -126,6 +128,15 @@ const App: React.FC = () => {
     role: 'Administrator',
     avatarColor: 'bg-indigo-500'
   });
+
+  // Global Context Menu Prevention
+  useEffect(() => {
+    const handleGlobalContextMenu = (e: MouseEvent) => {
+        e.preventDefault();
+    };
+    window.addEventListener('contextmenu', handleGlobalContextMenu);
+    return () => window.removeEventListener('contextmenu', handleGlobalContextMenu);
+  }, []);
 
   // Load Third Party Apps on mount
   useEffect(() => {
@@ -274,10 +285,10 @@ const App: React.FC = () => {
           id: `file:${file.name}`, 
           label: file.name, 
           icon: file.type === 'folder' 
-              ? <Folder size={28} className="text-yellow-400" />
+              ? <Folder size={28} className={file.hidden ? "text-yellow-400/50" : "text-yellow-400"} />
               : file.fileType === 'image' 
-                  ? <ImageIcon size={28} className="text-purple-400" />
-                  : <FileText size={28} className="text-blue-400" />,
+                  ? <ImageIcon size={28} className={file.hidden ? "text-purple-400/50" : "text-purple-400"} />
+                  : <FileText size={28} className={file.hidden ? "text-blue-400/50" : "text-blue-400"} />,
           data: file,
           date: file.date,
           size: parseInt(file.size || '0')
@@ -293,7 +304,7 @@ const App: React.FC = () => {
 
   }, [desktopFiles, sortOption, allInstalledApps]);
 
-  const rearrangeIcons = () => {
+  const rearrangeIcons = (forceAll = false) => {
       let gridSize = 104;
       let startX = 24;
       let startY = 24;
@@ -305,24 +316,50 @@ const App: React.FC = () => {
       const maxHeight = window.innerHeight - 60;
       const itemsPerColumn = Math.floor((maxHeight - startY) / gridSize);
 
-      const newPos: Record<string, {x: number, y: number}> = {};
+      const newPos: Record<string, {x: number, y: number}> = forceAll ? {} : { ...iconPositions };
+      const occupied = new Set<string>();
 
-      allDesktopItems.forEach((item, index) => {
-          const col = Math.floor(index / itemsPerColumn);
-          const row = index % itemsPerColumn;
+      // If preserving existing, mark occupied
+      if (!forceAll) {
+         Object.values(newPos).forEach(pos => {
+             const col = Math.round((pos.x - startX) / (gridSize + gap/2));
+             const row = Math.round((pos.y - startY) / gridSize);
+             occupied.add(`${col},${row}`);
+         });
+      }
 
-          newPos[item.id] = {
-              x: startX + col * (gridSize + gap/2),
-              y: startY + row * gridSize
-          };
+      let currentIdx = 0;
+      
+      allDesktopItems.forEach((item) => {
+          if (!forceAll && newPos[item.id]) return;
+
+          // Find next free spot
+          let found = false;
+          while (!found && currentIdx < 1000) {
+              const col = Math.floor(currentIdx / itemsPerColumn);
+              const row = currentIdx % itemsPerColumn;
+              const key = `${col},${row}`;
+              
+              if (!occupied.has(key)) {
+                  newPos[item.id] = {
+                      x: startX + col * (gridSize + gap/2),
+                      y: startY + row * gridSize
+                  };
+                  occupied.add(key);
+                  found = true;
+              }
+              currentIdx++;
+          }
       });
 
       setIconPositions(newPos);
   };
 
   useEffect(() => {
-      rearrangeIcons();
-  }, [allDesktopItems, iconSize]);
+      // If Auto Arrange is ON, force full rearrange based on sort
+      // If Auto Arrange is OFF, only position new items
+      rearrangeIcons(isAutoArrange);
+  }, [allDesktopItems, iconSize, isAutoArrange, sortOption]);
 
 
   const toggleTheme = () => {
@@ -365,6 +402,11 @@ const App: React.FC = () => {
         // If data.forceNew or unique ID passed (like browser-timestamp), we use that.
         // But openApp receives ID. If ID is already unique, we use it.
         // If ID is generic AppId.BROWSER, we do the check above.
+    }
+    
+    // Properties App - Create unique ID every time
+    if (id === AppId.PROPERTIES) {
+         targetId = `${AppId.PROPERTIES}-${Date.now()}`;
     }
 
     setWindows(prev => {
@@ -480,10 +522,15 @@ const App: React.FC = () => {
       setActiveContextMenu({ type: 'icon', x: e.clientX, y: e.clientY, data: item });
   };
 
-  const handleTaskbarContextMenu = (e: React.MouseEvent, appId: AppId) => {
+  const handleTaskbarIconContextMenu = (e: React.MouseEvent, appId: AppId) => {
       e.preventDefault();
       e.stopPropagation();
-      setActiveContextMenu({ type: 'taskbar', x: e.clientX, y: e.clientY, data: { id: appId }});
+      setActiveContextMenu({ type: 'taskbar-icon', x: e.clientX, y: e.clientY, data: { id: appId }});
+  };
+
+  const handleTaskbarBackgroundContextMenu = (e: React.MouseEvent) => {
+      e.preventDefault();
+      setActiveContextMenu({ type: 'taskbar-bg', x: e.clientX, y: e.clientY });
   };
 
   const handleStartMenuContextMenu = (e: React.MouseEvent, appId: AppId) => {
@@ -557,6 +604,8 @@ const App: React.FC = () => {
 
       const moveId = e.dataTransfer.getData('application/rakko-icon-move');
       if (moveId) {
+          if (isAutoArrange) return; // Cannot free-move in auto-arrange mode
+
           const newX = e.clientX - dragOffset.current.x;
           const newY = e.clientY - dragOffset.current.y;
           
@@ -590,14 +639,14 @@ const App: React.FC = () => {
                   reader.readAsDataURL(file);
                   reader.onload = () => {
                       try {
-                          fsService.createFile(uploadPath, file.name, 'file', '', reader.result as string);
+                          fsService.createFile(uploadPath, file.name, 'file', '', reader.result as string, file.size);
                       } catch(e) { console.error(e); }
                   };
               } else {
                   reader.readAsText(file);
                   reader.onload = () => {
                       try {
-                          fsService.createFile(uploadPath, file.name, 'file', reader.result as string);
+                          fsService.createFile(uploadPath, file.name, 'file', reader.result as string, undefined, file.size);
                       } catch(e) { console.error(e); }
                   };
               }
@@ -637,10 +686,35 @@ const App: React.FC = () => {
       }
   };
 
+  const handleOpenProperties = (item: any) => {
+      if (item) {
+          // If it's an app shortcut from desktop
+          if (item.type === 'app') {
+              openApp(AppId.PROPERTIES, { type: 'app', item: { id: item.id, label: item.label, icon: item.icon } });
+          }
+          // If it's a file
+          else if (item.type === 'file') {
+              openApp(AppId.PROPERTIES, { type: 'file', item: { ...item.data, _parentPath: '/C/Desktop' } });
+          }
+          // Generic object (coming from FileManager)
+          else if (item.name && item.type) {
+              openApp(AppId.PROPERTIES, { type: 'file', item });
+          }
+      } else {
+          // Desktop Properties
+          openApp(AppId.PROPERTIES, { type: 'desktop', item: { date: new Date().toLocaleDateString() } });
+      }
+  };
+
   const renderAppContent = (id: AppId, data?: any) => {
     // Dynamic Browser ID Check
     if (typeof id === 'string' && id.startsWith(AppId.BROWSER)) {
         return <BrowserApp initialUrl={data?.initialUrl} onOpenNewWindow={openNewBrowserWindow} />;
+    }
+    
+    // Properties ID Check
+    if (typeof id === 'string' && id.startsWith(AppId.PROPERTIES)) {
+        return <PropertiesApp data={data} onClose={() => closeApp(id)} onOpenApp={openApp} />;
     }
 
     // Check if it's a third-party app
@@ -659,13 +733,16 @@ const App: React.FC = () => {
       case AppId.PICTURE_VIEWER: 
         return <PictureViewerApp initialImage={data?.url} initialTitle={data?.title} />;
       case AppId.FILE_MANAGER:
-        return <FileManagerApp onOpenFile={(file, path) => {
-          if (file.fileType === 'image' && file.url) {
-            openApp(AppId.PICTURE_VIEWER, { url: file.url, title: file.name });
-          } else if (file.fileType === 'text') {
-            openApp(AppId.TEXT_EDITOR, { initialPath: path, initialFileName: file.name });
-          }
-        }} />;
+        return <FileManagerApp 
+            onOpenFile={(file, path) => {
+                if (file.fileType === 'image' && file.url) {
+                    openApp(AppId.PICTURE_VIEWER, { url: file.url, title: file.name });
+                } else if (file.fileType === 'text') {
+                    openApp(AppId.TEXT_EDITOR, { initialPath: path, initialFileName: file.name });
+                }
+            }} 
+            onOpenProperties={handleOpenProperties}
+        />;
       case AppId.TEXT_EDITOR:
         return <TextEditorApp initialPath={data?.initialPath} initialFileName={data?.initialFileName} />;
       case AppId.CONTROL_PANEL: 
@@ -685,6 +762,10 @@ const App: React.FC = () => {
     if (windowState.id.startsWith(AppId.BROWSER)) {
         return 'Rakko Browser';
     }
+    if (windowState.id.startsWith(AppId.PROPERTIES)) {
+        const item = windowState.data?.item;
+        return `Properties - ${item?.name || item?.label || 'System'}`;
+    }
     if (windowState.id === AppId.PICTURE_VIEWER) {
       return `Picture Studio${windowState.data?.title ? ` - ${windowState.data.title}` : ''}`;
     }
@@ -698,35 +779,66 @@ const App: React.FC = () => {
   const renderContextMenu = () => {
     if (!activeContextMenu) return null;
 
-    if (activeContextMenu.type === 'desktop') return null;
-
     let items: MenuItem[] = [];
+
+    if (activeContextMenu.type === 'desktop') {
+        items = [
+            { 
+                label: 'View',
+                icon: <Monitor size={14}/>,
+            }
+        ];
+        return null; 
+    }
 
     if (activeContextMenu.type === 'icon') {
         const item = activeContextMenu.data;
         items = [
             { label: 'Open', action: () => handleOpenItem(item) },
             { separator: true, label: '' },
+            { label: 'Properties', action: () => handleOpenProperties(item) },
+            { separator: true, label: '' },
             { label: 'Rename', action: () => handleRenameIcon(item) },
             { label: 'Delete', danger: true, action: () => handleDeleteIcon(item) }
         ];
-    } else if (activeContextMenu.type === 'taskbar') {
+    } else if (activeContextMenu.type === 'taskbar-icon') {
         const appId = activeContextMenu.data?.id;
-        const w = windows[appId];
-        const isOpen = w?.isOpen;
+        
+        // Determine if there are running instances for this app
+        const isRunning = Object.values(windows).some(win => {
+            if (appId === AppId.BROWSER) return win.id.startsWith(AppId.BROWSER) && win.isOpen;
+            return win.id === appId && win.isOpen;
+        });
         
         items = [
             { label: 'Open', action: () => handleTaskbarAppClick(appId) },
-            { label: 'Close window', disabled: !isOpen, danger: true, action: () => closeApp(appId) },
+            { label: 'Close window', disabled: !isRunning, danger: true, action: () => {
+                if (appId === AppId.BROWSER) {
+                     // Close all browser windows
+                     Object.values(windows).forEach(win => {
+                         if (win.id.startsWith(AppId.BROWSER)) closeApp(win.id);
+                     });
+                } else {
+                    closeApp(appId);
+                }
+            }},
             { separator: true, label: '' },
-            { label: isAppPinned(appId) ? 'Unpin from taskbar' : 'Pin to taskbar', action: () => togglePinApp(appId) }
+            { label: isAppPinned(appId) ? 'Unpin from taskbar' : 'Pin to taskbar', action: () => togglePinApp(appId) },
+            { label: 'Properties', action: () => handleOpenProperties({ type: 'app', id: appId, label: allInstalledApps.find(a=>a.id===appId)?.label }) }
+        ];
+    } else if (activeContextMenu.type === 'taskbar-bg') {
+        items = [
+            { label: 'Task Manager', action: () => openApp(AppId.TASK_MANAGER), icon: <Activity size={14}/> },
+            { label: 'Taskbar Settings', action: () => openApp(AppId.CONTROL_PANEL), icon: <Settings size={14}/> },
+            { label: 'Properties', action: () => handleOpenProperties(null) }
         ];
     } else if (activeContextMenu.type === 'start') {
         const appId = activeContextMenu.data?.id;
         items = [
             { label: 'Open', action: () => openApp(appId) },
             { separator: true, label: '' },
-            { label: isAppPinned(appId) ? 'Unpin from taskbar' : 'Pin to taskbar', action: () => togglePinApp(appId) }
+            { label: isAppPinned(appId) ? 'Unpin from taskbar' : 'Pin to taskbar', action: () => togglePinApp(appId) },
+            { label: 'Properties', action: () => handleOpenProperties({ type: 'app', id: appId, label: allInstalledApps.find(a=>a.id===appId)?.label }) }
         ];
     }
 
@@ -776,20 +888,21 @@ const App: React.FC = () => {
                 onContextMenu={(e) => { e.preventDefault(); setActiveContextMenu(null); }}
             />
             <div 
-                className="fixed z-[9999] min-w-[200px] bg-glass-panel backdrop-blur-xl border border-glass-border rounded-lg shadow-[0_10px_40px_rgba(0,0,0,0.5)] py-1.5 animate-pop flex flex-col text-sm text-glass-text origin-top-left"
+                className="fixed z-[9999] min-w-[220px] bg-glass-panel backdrop-blur-xl border border-glass-border rounded-lg shadow-[0_10px_40px_rgba(0,0,0,0.5)] py-1.5 animate-pop flex flex-col text-sm text-glass-text origin-top-left"
                 style={{ 
-                    top: Math.min(activeContextMenu.y, window.innerHeight - 320), 
-                    left: Math.min(activeContextMenu.x, window.innerWidth - 220) 
+                    top: Math.min(activeContextMenu.y, window.innerHeight - 340), 
+                    left: Math.min(activeContextMenu.x, window.innerWidth - 240) 
                 }}
                 onClick={(e) => e.stopPropagation()}
                 onContextMenu={(e) => e.preventDefault()}
             >
+                {/* View Submenu */}
                 <div className="group/item relative px-1">
                     <button className="w-full text-left px-3 py-2 hover:bg-indigo-600/80 hover:text-white rounded flex items-center justify-between">
                         <div className="flex items-center gap-2"><Monitor size={14} className="opacity-70"/> View</div>
                         <span className="text-[10px]">▶</span>
                     </button>
-                    <div className="absolute left-full top-0 ml-1 w-40 bg-glass-panel backdrop-blur-xl border border-glass-border rounded-lg shadow-xl py-1 hidden group-hover/item:block animate-fade-in">
+                    <div className="absolute left-full top-0 ml-1 w-44 bg-glass-panel backdrop-blur-xl border border-glass-border rounded-lg shadow-xl py-1 hidden group-hover/item:block animate-fade-in z-[10000]">
                         <button onClick={() => { setIconSize('large'); setActiveContextMenu(null); }} className="w-full text-left px-3 py-2 hover:bg-indigo-600/80 hover:text-white flex items-center gap-2">
                             <div className="w-4 flex justify-center">{iconSize === 'large' && <Check size={12}/>}</div> Large Icons
                         </button>
@@ -799,6 +912,10 @@ const App: React.FC = () => {
                         <button onClick={() => { setIconSize('small'); setActiveContextMenu(null); }} className="w-full text-left px-3 py-2 hover:bg-indigo-600/80 hover:text-white flex items-center gap-2">
                             <div className="w-4 flex justify-center">{iconSize === 'small' && <Check size={12}/>}</div> Small Icons
                         </button>
+                        <div className="h-px bg-white/10 my-1 mx-2" />
+                        <button onClick={() => { setIsAutoArrange(!isAutoArrange); setActiveContextMenu(null); }} className="w-full text-left px-3 py-2 hover:bg-indigo-600/80 hover:text-white flex items-center gap-2">
+                            <div className="w-4 flex justify-center">{isAutoArrange && <Check size={12}/>}</div> Auto arrange icons
+                        </button>
                     </div>
                 </div>
 
@@ -807,7 +924,7 @@ const App: React.FC = () => {
                         <div className="flex items-center gap-2"><Grid size={14} className="opacity-70"/> Sort by</div>
                         <span className="text-[10px]">▶</span>
                     </button>
-                    <div className="absolute left-full top-0 ml-1 w-40 bg-glass-panel backdrop-blur-xl border border-glass-border rounded-lg shadow-xl py-1 hidden group-hover/item:block animate-fade-in">
+                    <div className="absolute left-full top-0 ml-1 w-40 bg-glass-panel backdrop-blur-xl border border-glass-border rounded-lg shadow-xl py-1 hidden group-hover/item:block animate-fade-in z-[10000]">
                         <button onClick={() => { setSortOption('name'); setActiveContextMenu(null); }} className="w-full text-left px-3 py-2 hover:bg-indigo-600/80 hover:text-white flex items-center gap-2">
                             <div className="w-4 flex justify-center">{sortOption === 'name' && <Check size={12}/>}</div> Name
                         </button>
@@ -833,7 +950,7 @@ const App: React.FC = () => {
                         <div className="flex items-center gap-2"><Plus size={14} className="opacity-70"/> New</div>
                         <span className="text-[10px]">▶</span>
                     </button>
-                    <div className="absolute left-full top-0 ml-1 w-48 bg-glass-panel backdrop-blur-xl border border-glass-border rounded-lg shadow-xl py-1 hidden group-hover/item:block animate-fade-in">
+                    <div className="absolute left-full top-0 ml-1 w-48 bg-glass-panel backdrop-blur-xl border border-glass-border rounded-lg shadow-xl py-1 hidden group-hover/item:block animate-fade-in z-[10000]">
                         <button onClick={() => handleCreateNew('folder')} className="w-full text-left px-3 py-2 hover:bg-indigo-600/80 hover:text-white flex items-center gap-2">
                             <Folder size={14} className="text-yellow-400"/> Folder
                         </button>
@@ -848,6 +965,10 @@ const App: React.FC = () => {
                 <button onClick={() => { openApp(AppId.CONTROL_PANEL); setActiveContextMenu(null); }} className="text-left px-4 py-2 hover:bg-indigo-600/80 hover:text-white flex items-center gap-3 transition-colors mx-1 rounded">
                     <Settings size={14} className="opacity-70"/> Personalize
                 </button>
+
+                <button onClick={() => { handleOpenProperties(null); setActiveContextMenu(null); }} className="text-left px-4 py-2 hover:bg-indigo-600/80 hover:text-white flex items-center gap-3 transition-colors mx-1 rounded">
+                    <SlidersHorizontal size={14} className="opacity-70"/> Properties
+                </button>
             </div>
           </>,
           document.body
@@ -859,6 +980,7 @@ const App: React.FC = () => {
       {(Object.values(windows) as WindowState[]).map(windowState => {
           const isOnCurrentDesktop = windowState.desktopId === currentDesktop;
           const isBrowser = windowState.id.startsWith(AppId.BROWSER);
+          const isProperties = windowState.id.startsWith(AppId.PROPERTIES);
 
           return (
             <div key={windowState.id} style={{ display: isOnCurrentDesktop ? 'block' : 'none' }}>
@@ -877,8 +999,9 @@ const App: React.FC = () => {
                 initialSize={
                   windowState.id === AppId.PICTURE_VIEWER ? { width: 900, height: 650 } : 
                   (isBrowser ? { width: 1024, height: 700 } :
+                  (isProperties ? { width: 420, height: 550 } :
                   (windowState.id === AppId.CHAT ? { width: 400, height: 600 } : 
-                  (windowState.id === AppId.TASK_MANAGER ? { width: 800, height: 600 } : undefined)))
+                  (windowState.id === AppId.TASK_MANAGER ? { width: 800, height: 600 } : undefined))))
                 }
                 >
                 {renderAppContent(windowState.id, windowState.data)}
@@ -940,7 +1063,8 @@ const App: React.FC = () => {
             isStartMenuOpen={isStartMenuOpen}
             onToggleStartMenu={() => setIsStartMenuOpen(!isStartMenuOpen)}
             onAppClick={handleTaskbarAppClick}
-            onAppContextMenu={handleTaskbarContextMenu}
+            onAppContextMenu={handleTaskbarIconContextMenu}
+            onTaskbarContextMenu={handleTaskbarBackgroundContextMenu}
             onCloseApp={closeApp}
             onToggleTaskView={() => setIsTaskViewOpen(!isTaskViewOpen)}
             onToggleTheme={toggleTheme}
@@ -989,7 +1113,7 @@ const DesktopLayer: React.FC<any> = (props) => {
             {allDesktopItems.map((item: any) => (
                 <div
                     key={item.id}
-                    className="desktop-icon absolute z-10"
+                    className={`desktop-icon absolute z-10 ${item.data?.hidden ? 'opacity-50' : ''}`}
                     style={{
                         left: iconPositions[item.id]?.x || 0,
                         top: iconPositions[item.id]?.y || 0,
@@ -1021,6 +1145,7 @@ const DesktopLayer: React.FC<any> = (props) => {
                             size={iconSize}
                             onClick={() => handleOpenItem(item)} 
                             accentColor={settings.accentColor}
+                            colorTag={item.data?.colorTag}
                         />
                     )}
                 </div>
@@ -1029,7 +1154,7 @@ const DesktopLayer: React.FC<any> = (props) => {
     );
 };
 
-const DesktopIcon: React.FC<{ label: string; icon: React.ReactNode; onClick: () => void; accentColor: string; size: IconSize }> = ({ label, icon, onClick, accentColor, size }) => {
+const DesktopIcon: React.FC<{ label: string; icon: React.ReactNode; onClick: () => void; accentColor: string; size: IconSize; colorTag?: string }> = ({ label, icon, onClick, accentColor, size, colorTag }) => {
     const sizeConfig = {
         small: { width: 'w-[72px]', iconBox: 'w-10 h-10', iconSize: 20, text: 'text-[10px] line-clamp-2' },
         medium: { width: 'w-24', iconBox: 'w-14 h-14', iconSize: 28, text: 'text-xs' },
@@ -1042,8 +1167,14 @@ const DesktopIcon: React.FC<{ label: string; icon: React.ReactNode; onClick: () 
             onClick={onClick}
             className={`group flex flex-col items-center gap-1.5 ${cfg.width} p-2 rounded-lg hover:bg-white/10 transition-all focus:outline-none focus:bg-white/20 cursor-default`}
         >
-            <div className={`${cfg.iconBox} rounded-xl bg-glass-panel flex items-center justify-center shadow-lg border border-glass-border group-hover:scale-105 transition-transform duration-200 text-${accentColor}-400 group-hover:text-${accentColor}-300 cursor-pointer pointer-events-none`}>
+            <div className={`${cfg.iconBox} rounded-xl bg-glass-panel flex items-center justify-center shadow-lg border border-glass-border group-hover:scale-105 transition-transform duration-200 text-${accentColor}-400 group-hover:text-${accentColor}-300 cursor-pointer pointer-events-none relative`}>
             {React.isValidElement(icon) ? React.cloneElement(icon as React.ReactElement<any>, { size: cfg.iconSize }) : icon}
+            {colorTag && (
+                <div 
+                    className="absolute -top-1 -right-1 w-3 h-3 rounded-full border border-white shadow-sm"
+                    style={{ backgroundColor: colorTag }}
+                />
+            )}
             </div>
             <span className={`text-white font-medium text-shadow-sm bg-black/40 px-2 py-0.5 rounded-full backdrop-blur-sm border border-transparent group-hover:border-white/10 cursor-pointer break-all text-center leading-tight ${cfg.text}`}>
             {label}

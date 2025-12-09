@@ -4,11 +4,12 @@ import {
     Image as ImageIcon, Upload, Download, Sliders, 
     Sun, Contrast, Droplet, MoveHorizontal, MoveVertical, 
     Eye, EyeOff, Aperture, PaintBucket, FolderOpen,
-    Check
+    Check, X
 } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import { fsService } from '../../services/fileSystemService';
 import { FileSystemItem } from '../../types';
+import { FileManagerApp } from './FileManagerApp';
 
 interface PictureViewerProps {
   initialImage?: string;
@@ -48,7 +49,6 @@ export const PictureViewerApp: React.FC<PictureViewerProps> = ({ initialImage, i
   const [title, setTitle] = useState(initialTitle || 'Untitled');
   const [state, setState] = useState<EditorState>(DEFAULT_STATE);
   const [showFilePicker, setShowFilePicker] = useState(false);
-  const [availableImages, setAvailableImages] = useState<FileSystemItem[]>([]);
   
   const imageRef = useRef<HTMLImageElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -71,10 +71,6 @@ export const PictureViewerApp: React.FC<PictureViewerProps> = ({ initialImage, i
 
   // 1. File Browser/Open
   const handleOpenClick = () => {
-      // Fetch images from standard pictures directory for simplicity in this demo
-      const files = fsService.getDirectory('/MyDocument/Picture');
-      const images = files.filter(f => f.fileType === 'image' && f.url);
-      setAvailableImages(images);
       setShowFilePicker(true);
   };
 
@@ -136,8 +132,25 @@ export const PictureViewerApp: React.FC<PictureViewerProps> = ({ initialImage, i
                   <FolderOpen size={16} /> Open Image
               </button>
               
-              {/* Internal File Picker Modal (reuse logic below) */}
-              {showFilePicker && <FilePickerModal images={availableImages} onClose={() => setShowFilePicker(false)} onSelect={selectImage} />}
+              {showFilePicker && (
+                  <div className="absolute inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-8">
+                    <div className="w-full h-full max-w-4xl max-h-[80vh] bg-[#1c1c1c] rounded-xl overflow-hidden shadow-2xl border border-white/10 flex flex-col animate-pop">
+                        <div className="flex items-center justify-between p-3 border-b border-white/10 bg-white/5">
+                            <span className="font-bold ml-2 text-sm text-white flex items-center gap-2"><ImageIcon size={16}/> Select Image</span>
+                            <button onClick={() => setShowFilePicker(false)} className="hover:text-white transition-colors"><X size={18}/></button>
+                        </div>
+                        <div className="flex-1 overflow-hidden relative">
+                            <FileManagerApp 
+                                mode="picker"
+                                allowedExtensions={['png', 'jpg', 'jpeg', 'webp', 'gif']}
+                                onSelectFile={selectImage}
+                                onCancel={() => setShowFilePicker(false)}
+                                initialPath="/MyDocument/Picture"
+                            />
+                        </div>
+                    </div>
+                  </div>
+              )}
           </div>
       );
   }
@@ -149,7 +162,7 @@ export const PictureViewerApp: React.FC<PictureViewerProps> = ({ initialImage, i
   };
 
   return (
-    <div className="h-full flex flex-col bg-[#121212] text-gray-200 font-sans">
+    <div className="h-full flex flex-col bg-[#121212] text-gray-200 font-sans relative">
       {/* Top Toolbar */}
       <div className="h-14 border-b border-white/10 bg-[#1a1a1a] flex items-center justify-between px-4 shrink-0">
           <div className="flex items-center gap-4">
@@ -224,7 +237,25 @@ export const PictureViewerApp: React.FC<PictureViewerProps> = ({ initialImage, i
           </div>
       </div>
 
-      {showFilePicker && <FilePickerModal images={availableImages} onClose={() => setShowFilePicker(false)} onSelect={selectImage} />}
+      {showFilePicker && (
+          <div className="absolute inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-8">
+            <div className="w-full h-full max-w-4xl max-h-[80vh] bg-[#1c1c1c] rounded-xl overflow-hidden shadow-2xl border border-white/10 flex flex-col animate-pop">
+                <div className="flex items-center justify-between p-3 border-b border-white/10 bg-white/5">
+                    <span className="font-bold ml-2 text-sm text-white flex items-center gap-2"><ImageIcon size={16}/> Select Image</span>
+                    <button onClick={() => setShowFilePicker(false)} className="hover:text-white transition-colors"><X size={18}/></button>
+                </div>
+                <div className="flex-1 overflow-hidden relative">
+                    <FileManagerApp 
+                        mode="picker"
+                        allowedExtensions={['png', 'jpg', 'jpeg', 'webp', 'gif']}
+                        onSelectFile={selectImage}
+                        onCancel={() => setShowFilePicker(false)}
+                        initialPath="/MyDocument/Picture"
+                    />
+                </div>
+            </div>
+          </div>
+      )}
     </div>
   );
 };
@@ -257,35 +288,4 @@ const FilterToggle = ({ label, active, onClick, icon }: any) => (
 
 const ImageSepiaIcon = () => (
     <div className="w-3.5 h-3.5 rounded-full bg-amber-700/60 border border-amber-500/50"></div>
-);
-
-const FilePickerModal = ({ images, onClose, onSelect }: { images: FileSystemItem[], onClose: () => void, onSelect: (img: FileSystemItem) => void }) => (
-    <div className="absolute inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-8 animate-fade-in" onClick={onClose}>
-        <div className="bg-[#1a1a1a] border border-white/10 rounded-xl w-full max-w-2xl max-h-[80%] flex flex-col shadow-2xl" onClick={e => e.stopPropagation()}>
-            <div className="p-4 border-b border-white/10 flex items-center justify-between">
-                <h3 className="font-bold text-white flex items-center gap-2"><FolderOpen size={18}/> Select Image</h3>
-                <button onClick={onClose} className="p-1 hover:bg-white/10 rounded-full"><Sliders size={18}/></button>
-            </div>
-            <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
-                {images.length === 0 ? (
-                    <div className="text-center text-gray-500 py-8">No images found in /MyDocument/Picture</div>
-                ) : (
-                    <div className="grid grid-cols-3 sm:grid-cols-4 gap-4">
-                        {images.map((img, idx) => (
-                            <button 
-                                key={idx} 
-                                onClick={() => onSelect(img)}
-                                className="group relative aspect-square bg-black rounded-lg border border-white/10 overflow-hidden hover:border-indigo-500 transition-all"
-                            >
-                                <img src={img.url} alt={img.name} className="w-full h-full object-cover opacity-70 group-hover:opacity-100 transition-opacity" />
-                                <div className="absolute inset-x-0 bottom-0 p-2 bg-gradient-to-t from-black/80 to-transparent text-xs text-white truncate text-center">
-                                    {img.name}
-                                </div>
-                            </button>
-                        ))}
-                    </div>
-                )}
-            </div>
-        </div>
-    </div>
 );

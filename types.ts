@@ -12,7 +12,8 @@ export const AppId = {
   TEXT_EDITOR: 'text_editor',
   HELP: 'help',
   TASK_MANAGER: 'task_manager',
-  BROWSER: 'browser'
+  BROWSER: 'browser',
+  PROPERTIES: 'properties'
 } as const;
 
 export type AppId = typeof AppId[keyof typeof AppId] | string;
@@ -74,7 +75,10 @@ export interface FileSystemItem {
   url?: string;
   content?: string;
   fileType?: 'image' | 'text' | 'unknown';
-  readOnly?: boolean; // New: to protect System files
+  readOnly?: boolean; // Protect System files
+  hidden?: boolean; // Hidden attribute
+  colorTag?: string; // Color label for icon
+  _parentPath?: string; // Helper for navigation
 }
 
 export interface FileClipboard {
@@ -90,4 +94,5 @@ export interface MenuItem {
   disabled?: boolean;
   danger?: boolean;
   separator?: boolean;
+  checked?: boolean; // For toggle items
 }

@@ -5,13 +5,19 @@ import {
   Image as ImageIcon, Search, Grid, List as ListIcon, 
   HardDrive, ChevronRight, Plus, Trash2, RefreshCw,
   MoreVertical, Copy, Scissors, Clipboard, Edit3, Eye, Download, Info, X, SlidersHorizontal,
-  Code, Music, Video, Box, Monitor
+  Code, Music, Video, Box, Monitor, Check
 } from 'lucide-react';
 import { fsService } from '../../services/fileSystemService';
 import { FileSystemItem, FileClipboard } from '../../types';
 
 interface FileManagerProps {
-  onOpenFile: (file: FileSystemItem, path: string) => void;
+  onOpenFile?: (file: FileSystemItem, path: string) => void;
+  mode?: 'default' | 'picker';
+  allowedExtensions?: string[];
+  onSelectFile?: (file: FileSystemItem) => void;
+  onCancel?: () => void;
+  initialPath?: string;
+  onOpenProperties?: (item: FileSystemItem) => void;
 }
 
 type SortOption = 'name' | 'date' | 'size' | 'type';
@@ -20,9 +26,13 @@ type ViewMode = 'grid' | 'list';
 // --- Polished Icon Components ---
 
 const FileIcon = ({ item, size }: { item: FileSystemItem, size: number }) => {
+  // If colorTag is present, apply it
+  const colorStyle = item.colorTag ? { filter: `drop-shadow(0 0 2px ${item.colorTag})` } : {};
+  const opacityClass = item.hidden ? 'opacity-50' : 'opacity-100';
+
   if (item.type === 'folder') {
     return (
-      <div className="relative group transition-transform duration-300" style={{ width: size, height: size * 0.85 }}>
+      <div className={`relative group transition-transform duration-300 ${opacityClass}`} style={{ width: size, height: size * 0.85, ...colorStyle }}>
         {/* Back Plate */}
         <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-indigo-500 to-indigo-700 rounded-lg shadow-lg transform transition-transform group-hover:-translate-y-1"></div>
         {/* Front Plate (Flap) */}
@@ -32,6 +42,10 @@ const FileIcon = ({ item, size }: { item: FileSystemItem, size: number }) => {
         </div>
         {/* Content Preview Hint */}
         <div className="absolute top-0 right-2 w-[40%] h-[30%] bg-white/20 rounded-t-sm backdrop-blur-sm -z-10"></div>
+        {/* Color Tag Badge */}
+        {item.colorTag && (
+            <div className="absolute -bottom-1 -right-1 w-3 h-3 rounded-full border border-white" style={{ backgroundColor: item.colorTag }}></div>
+        )}
       </div>
     );
   }
@@ -40,8 +54,8 @@ const FileIcon = ({ item, size }: { item: FileSystemItem, size: number }) => {
   const isImage = item.fileType === 'image';
   return (
     <div 
-        className="relative shadow-md transition-transform duration-300 group-hover:-translate-y-2 group-hover:rotate-1" 
-        style={{ width: size * 0.8, height: size }}
+        className={`relative shadow-md transition-transform duration-300 group-hover:-translate-y-2 group-hover:rotate-1 ${opacityClass}`}
+        style={{ width: size * 0.8, height: size, ...colorStyle }}
     >
       {/* Paper Sheet */}
       <div className="absolute inset-0 bg-gradient-to-br from-gray-50 to-gray-200 rounded-md border border-white/40 flex flex-col items-center overflow-hidden">
@@ -66,18 +80,30 @@ const FileIcon = ({ item, size }: { item: FileSystemItem, size: number }) => {
              </div>
          </div>
       </div>
+      {/* Color Tag Badge */}
+      {item.colorTag && (
+          <div className="absolute -bottom-1 -right-1 w-3 h-3 rounded-full border border-white shadow-sm z-10" style={{ backgroundColor: item.colorTag }}></div>
+      )}
     </div>
   );
 };
 
-export const FileManagerApp: React.FC<FileManagerProps> = ({ onOpenFile }) => {
+export const FileManagerApp: React.FC<FileManagerProps> = ({ 
+  onOpenFile, 
+  mode = 'default',
+  allowedExtensions,
+  onSelectFile,
+  onCancel,
+  initialPath = '/',
+  onOpenProperties
+}) => {
   // Navigation
-  const [history, setHistory] = useState<string[]>(['/']);
+  const [history, setHistory] = useState<string[]>([initialPath]);
   const [historyIndex, setHistoryIndex] = useState(0);
-  const [currentPath, setCurrentPath] = useState('/');
+  const [currentPath, setCurrentPath] = useState(initialPath);
   // New Feature: Breadcrumb mode instead of plain text
   const [isEditingAddress, setIsEditingAddress] = useState(false);
-  const [addressInput, setAddressInput] = useState('/');
+  const [addressInput, setAddressInput] = useState(initialPath);
 
   // Data & View
   const [files, setFiles] = useState<FileSystemItem[]>([]);
@@ -104,7 +130,6 @@ export const FileManagerApp: React.FC<FileManagerProps> = ({ onOpenFile }) => {
 
   // UI State
   const [contextMenu, setContextMenu] = useState<{x: number, y: number, item?: string} | null>(null);
-  const [showProperties, setShowProperties] = useState<FileSystemItem | null>(null);
 
   // Helper to load files with new reference to trigger render
   const loadFiles = (path: string) => {
@@ -296,14 +321,14 @@ export const FileManagerApp: React.FC<FileManagerProps> = ({ onOpenFile }) => {
                   reader.readAsDataURL(file);
                   reader.onload = () => {
                       try {
-                          fsService.createFile(destPath, file.name, 'file', '', reader.result as string);
+                          fsService.createFile(destPath, file.name, 'file', '', reader.result as string, file.size);
                       } catch (e: any) { console.error(e); }
                   };
               } else {
                   reader.readAsText(file);
                   reader.onload = () => {
                       try {
-                          fsService.createFile(destPath, file.name, 'file', reader.result as string);
+                          fsService.createFile(destPath, file.name, 'file', reader.result as string, undefined, file.size);
                       } catch (e: any) { console.error(e); }
                   };
               }
@@ -331,9 +356,27 @@ export const FileManagerApp: React.FC<FileManagerProps> = ({ onOpenFile }) => {
       }
   };
 
+  const handlePickerSelect = () => {
+      if (mode === 'picker' && onSelectFile && selectedItems.size === 1) {
+          const name = Array.from(selectedItems)[0];
+          const item = files.find(f => f.name === name);
+          if (item) onSelectFile(item);
+      }
+  };
+
   // --- Sorting & Filtering ---
   const processedFiles = useMemo(() => {
     let result = [...files];
+    
+    // Picker mode extension filter
+    if (mode === 'picker' && allowedExtensions && allowedExtensions.length > 0) {
+        result = result.filter(f => {
+            if (f.type === 'folder') return true;
+            const ext = f.name.split('.').pop()?.toLowerCase();
+            return ext && allowedExtensions.includes(ext);
+        });
+    }
+
     if (searchQuery) {
       result = result.filter(f => f.name.toLowerCase().includes(searchQuery.toLowerCase()));
     }
@@ -352,7 +395,7 @@ export const FileManagerApp: React.FC<FileManagerProps> = ({ onOpenFile }) => {
       return 0;
     });
     return result;
-  }, [files, searchQuery, sortBy, sortDesc]);
+  }, [files, searchQuery, sortBy, sortDesc, mode, allowedExtensions]);
 
   // --- Context Menu Handler ---
   const handleContextMenu = (e: React.MouseEvent, itemName?: string) => {
@@ -450,13 +493,17 @@ export const FileManagerApp: React.FC<FileManagerProps> = ({ onOpenFile }) => {
       {/* 2. Toolbar */}
       <div className="h-10 border-b border-glass-border bg-glass-bg/10 flex items-center justify-between px-3 shrink-0 backdrop-blur-md">
          <div className="flex items-center gap-1">
-             <button disabled={!canWrite} onClick={() => setIsCreating('file')} className="flex items-center gap-1 px-3 py-1 rounded hover:bg-white/10 disabled:opacity-30 text-xs font-medium transition-colors hover:text-white">
-                 <Plus size={14} /> New File
-             </button>
-             <button disabled={!canWrite} onClick={() => setIsCreating('folder')} className="flex items-center gap-1 px-3 py-1 rounded hover:bg-white/10 disabled:opacity-30 text-xs font-medium transition-colors hover:text-white">
-                 <Folder size={14} /> New Folder
-             </button>
-             <div className="w-px h-4 bg-glass-border mx-2" />
+             {mode !== 'picker' && (
+                 <>
+                    <button disabled={!canWrite} onClick={() => setIsCreating('file')} className="flex items-center gap-1 px-3 py-1 rounded hover:bg-white/10 disabled:opacity-30 text-xs font-medium transition-colors hover:text-white">
+                        <Plus size={14} /> New File
+                    </button>
+                    <button disabled={!canWrite} onClick={() => setIsCreating('folder')} className="flex items-center gap-1 px-3 py-1 rounded hover:bg-white/10 disabled:opacity-30 text-xs font-medium transition-colors hover:text-white">
+                        <Folder size={14} /> New Folder
+                    </button>
+                    <div className="w-px h-4 bg-glass-border mx-2" />
+                 </>
+             )}
              <button onClick={() => setSortDesc(!sortDesc)} className="flex items-center gap-1 px-3 py-1 rounded hover:bg-white/10 text-xs font-medium transition-colors">
                  <SlidersHorizontal size={14} /> Sort {sortDesc ? 'Desc' : 'Asc'}
              </button>
@@ -569,7 +616,17 @@ export const FileManagerApp: React.FC<FileManagerProps> = ({ onOpenFile }) => {
                             e.stopPropagation();
                             toggleSelection(item.name, e.ctrlKey || e.metaKey);
                         }}
-                        onDoubleClick={() => item.type === 'folder' ? navigateTo(`${currentPath === '/' ? '' : currentPath}/${item.name}`) : onOpenFile(item, currentPath)}
+                        onDoubleClick={() => {
+                            if (item.type === 'folder') {
+                                navigateTo(`${currentPath === '/' ? '' : currentPath}/${item.name}`);
+                            } else {
+                                if (mode === 'picker' && onSelectFile) {
+                                    onSelectFile(item);
+                                } else if (onOpenFile) {
+                                    onOpenFile(item, currentPath);
+                                }
+                            }
+                        }}
                         onContextMenu={(e) => handleContextMenu(e, item.name)}
                         className={`
                             group relative flex cursor-pointer select-none animate-slide-up
@@ -603,7 +660,9 @@ export const FileManagerApp: React.FC<FileManagerProps> = ({ onOpenFile }) => {
                                         onClick={(e) => e.stopPropagation()}
                                     />
                                 ) : (
-                                    <div className={`truncate text-sm font-medium transition-colors ${isSelected ? 'text-white' : 'text-gray-300 group-hover:text-white'}`}>{item.name}</div>
+                                    <div className={`truncate text-sm font-medium transition-colors ${isSelected ? 'text-white' : 'text-gray-300 group-hover:text-white'} ${item.hidden ? 'opacity-50' : ''}`}>
+                                        {item.name}
+                                    </div>
                                 )}
                                 
                                 {viewMode === 'list' && !isRenaming && (
@@ -652,17 +711,35 @@ export const FileManagerApp: React.FC<FileManagerProps> = ({ onOpenFile }) => {
           )}
       </div>
 
-      {/* 4. Status Bar */}
-      <div className="h-7 bg-glass-bg/40 border-t border-glass-border flex items-center justify-between px-4 text-[10px] text-gray-400 font-mono shrink-0">
-         <div className="flex items-center gap-4">
-            <span>{processedFiles.length} item(s)</span>
-            <span>{selectedItems.size} selected</span>
-         </div>
-         <div className="flex items-center gap-4">
-             {clipboard && <span className="text-indigo-300 flex items-center gap-1"><Clipboard size={10}/> {clipboard.type === 'copy' ? 'Copy' : 'Cut'} {clipboard.items.length} item(s)</span>}
-             <span className={canWrite ? "text-emerald-500/80" : "text-amber-500/80"}>{canWrite ? 'Read/Write' : 'Read Only'}</span>
-         </div>
-      </div>
+      {/* 4. Status Bar or Footer */}
+      {mode === 'picker' ? (
+          <div className="h-14 bg-glass-bg/60 border-t border-glass-border flex items-center justify-end px-4 gap-3 shrink-0 backdrop-blur-md">
+              <button 
+                onClick={onCancel}
+                className="px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/5 rounded-lg text-sm text-gray-300 transition-colors"
+              >
+                  Cancel
+              </button>
+              <button 
+                onClick={handlePickerSelect}
+                disabled={selectedItems.size !== 1}
+                className="px-6 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-sm text-white font-medium shadow-lg shadow-indigo-500/20 transition-all"
+              >
+                  Select File
+              </button>
+          </div>
+      ) : (
+        <div className="h-7 bg-glass-bg/40 border-t border-glass-border flex items-center justify-between px-4 text-[10px] text-gray-400 font-mono shrink-0">
+            <div className="flex items-center gap-4">
+                <span>{processedFiles.length} item(s)</span>
+                <span>{selectedItems.size} selected</span>
+            </div>
+            <div className="flex items-center gap-4">
+                {clipboard && <span className="text-indigo-300 flex items-center gap-1"><Clipboard size={10}/> {clipboard.type === 'copy' ? 'Copy' : 'Cut'} {clipboard.items.length} item(s)</span>}
+                <span className={canWrite ? "text-emerald-500/80" : "text-amber-500/80"}>{canWrite ? 'Read/Write' : 'Read Only'}</span>
+            </div>
+        </div>
+      )}
 
       {/* --- Modals & Popups --- */}
 
@@ -692,12 +769,27 @@ export const FileManagerApp: React.FC<FileManagerProps> = ({ onOpenFile }) => {
                     <button onClick={() => { handleManualRefresh(); setContextMenu(null); }} className="text-left px-4 py-2 hover:bg-indigo-600 hover:text-white flex items-center gap-3 transition-colors group"><RefreshCw size={14} className="text-gray-400 group-hover:text-white"/> Refresh</button>
                     <div className="h-px bg-white/10 my-1 mx-2"/>
                     <button disabled={!clipboard} onClick={() => { handlePaste(); setContextMenu(null); }} className="text-left px-4 py-2 hover:bg-indigo-600 hover:text-white disabled:opacity-50 flex items-center gap-3 transition-colors group"><Clipboard size={14} className="text-gray-400 group-hover:text-white"/> Paste</button>
-                    <button onClick={() => { setShowProperties({ name: 'Current Folder', type: 'folder', date: '', size: '', readOnly: !canWrite } as any); setContextMenu(null); }} className="text-left px-4 py-2 hover:bg-indigo-600 hover:text-white flex items-center gap-3 transition-colors group"><Info size={14} className="text-gray-400 group-hover:text-white"/> Properties</button>
+                    <button onClick={() => { if(onOpenProperties) onOpenProperties({ name: 'Current Folder', type: 'folder', date: '', size: '', readOnly: !canWrite, _parentPath: currentPath } as any); setContextMenu(null); }} className="text-left px-4 py-2 hover:bg-indigo-600 hover:text-white flex items-center gap-3 transition-colors group"><Info size={14} className="text-gray-400 group-hover:text-white"/> Properties</button>
                   </>
               ) : (
                   // Item Menu
                   <>
-                    <button onClick={() => { if(activeItem) activeItem.type === 'folder' ? navigateTo(`${currentPath === '/' ? '' : currentPath}/${activeItem.name}`) : onOpenFile(activeItem, currentPath); setContextMenu(null); }} className="text-left px-4 py-2 hover:bg-indigo-600 hover:text-white font-bold transition-colors">Open</button>
+                    <button onClick={() => { 
+                         if(activeItem) {
+                             if(activeItem.type === 'folder') {
+                                 navigateTo(`${currentPath === '/' ? '' : currentPath}/${activeItem.name}`);
+                             } else {
+                                 if (mode === 'picker' && onSelectFile) {
+                                     onSelectFile(activeItem);
+                                 } else if (onOpenFile) {
+                                     onOpenFile(activeItem, currentPath);
+                                 }
+                             }
+                         }
+                         setContextMenu(null); 
+                    }} className="text-left px-4 py-2 hover:bg-indigo-600 hover:text-white font-bold transition-colors">
+                        {mode === 'picker' && activeItem?.type === 'file' ? 'Select' : 'Open'}
+                    </button>
                     <div className="h-px bg-white/10 my-1 mx-2"/>
                     <button onClick={() => { handleCopy(); setContextMenu(null); }} className="text-left px-4 py-2 hover:bg-indigo-600 hover:text-white flex items-center gap-3 transition-colors group"><Copy size={14} className="text-gray-400 group-hover:text-white"/> Copy</button>
                     <button disabled={!canWrite || activeItem?.readOnly} onClick={() => { handleCut(); setContextMenu(null); }} className="text-left px-4 py-2 hover:bg-indigo-600 hover:text-white disabled:opacity-50 flex items-center gap-3 transition-colors group"><Scissors size={14} className="text-gray-400 group-hover:text-white"/> Cut</button>
@@ -706,54 +798,12 @@ export const FileManagerApp: React.FC<FileManagerProps> = ({ onOpenFile }) => {
                     <button disabled={!canWrite || activeItem?.readOnly} onClick={() => { deleteItems(Array.from(selectedItems)); setContextMenu(null); }} className="text-left px-4 py-2 hover:bg-red-600 hover:text-white disabled:opacity-50 flex items-center gap-3 text-red-400 transition-colors group"><Trash2 size={14} className="text-red-400 group-hover:text-white"/> Delete</button>
                     <div className="h-px bg-white/10 my-1 mx-2"/>
                     <button onClick={() => { if(activeItem) handleDownload(activeItem); setContextMenu(null); }} className="text-left px-4 py-2 hover:bg-indigo-600 hover:text-white flex items-center gap-3 transition-colors group"><Download size={14} className="text-gray-400 group-hover:text-white"/> Download</button>
-                    <button onClick={() => { if(activeItem) setShowProperties(activeItem); setContextMenu(null); }} className="text-left px-4 py-2 hover:bg-indigo-600 hover:text-white flex items-center gap-3 transition-colors group"><Info size={14} className="text-gray-400 group-hover:text-white"/> Properties</button>
+                    <button onClick={() => { if(activeItem && onOpenProperties) onOpenProperties({...activeItem, _parentPath: currentPath}); setContextMenu(null); }} className="text-left px-4 py-2 hover:bg-indigo-600 hover:text-white flex items-center gap-3 transition-colors group"><Info size={14} className="text-gray-400 group-hover:text-white"/> Properties</button>
                   </>
               )}
             </div>
           </>,
           document.body
-      )}
-
-      {/* Properties Modal */}
-      {showProperties && (
-          <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-fade-in" onClick={() => setShowProperties(null)}>
-              <div className="w-80 bg-glass-panel border border-glass-border rounded-2xl shadow-2xl p-6 text-glass-text transform transition-all scale-100" onClick={(e) => e.stopPropagation()}>
-                  <div className="flex items-center gap-4 mb-6">
-                      <div className="w-16 h-16 flex items-center justify-center">
-                          <FileIcon item={showProperties} size={64} />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                          <h3 className="font-bold text-lg truncate text-white">{showProperties.name}</h3>
-                          <div className="text-xs text-indigo-400 uppercase tracking-wider font-bold">{showProperties.type}</div>
-                      </div>
-                  </div>
-                  
-                  <div className="space-y-3 text-sm">
-                      <div className="flex justify-between py-2 border-b border-white/5">
-                          <span className="text-gray-500">Location</span>
-                          <span className="font-mono truncate max-w-[150px] text-gray-300">{currentPath}</span>
-                      </div>
-                      <div className="flex justify-between py-2 border-b border-white/5">
-                          <span className="text-gray-500">Size</span>
-                          <span className="text-gray-300">{showProperties.size || 'Calculated...'}</span>
-                      </div>
-                      <div className="flex justify-between py-2 border-b border-white/5">
-                          <span className="text-gray-500">Modified</span>
-                          <span className="text-gray-300">{showProperties.date}</span>
-                      </div>
-                      <div className="flex justify-between py-2 border-b border-white/5">
-                          <span className="text-gray-500">Access</span>
-                          <span className={showProperties.readOnly ? "text-red-400 font-bold" : "text-emerald-400 font-bold"}>
-                              {showProperties.readOnly ? 'Read Only' : 'Read / Write'}
-                          </span>
-                      </div>
-                  </div>
-
-                  <button onClick={() => setShowProperties(null)} className="w-full mt-6 py-2.5 bg-white/10 hover:bg-white/20 text-white rounded-lg transition-colors font-medium">
-                      Close
-                  </button>
-              </div>
-          </div>
       )}
     </div>
   );

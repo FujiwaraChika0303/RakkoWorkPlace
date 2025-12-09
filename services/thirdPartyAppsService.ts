@@ -15,12 +15,23 @@ export interface ThirdPartyAppDefinition {
  */
 export const scanThirdPartyApps = (): ThirdPartyAppDefinition[] => {
   const apps: ThirdPartyAppDefinition[] = [];
+  
+  // Manual Registry Fallback
+  // Used when import.meta.glob is not supported (e.g. non-Vite environments)
+  const manualRegistry: ThirdPartyAppDefinition[] = [
+      {
+          id: '3rd_party_RTest',
+          label: 'RTest',
+          url: '/ThirdApps/RTest/index.html'
+      }
+  ];
+
   const meta = import.meta as any;
 
   // Check if we are in a Vite environment supporting glob import
-  if (typeof meta.glob !== 'function') {
-    console.warn('System: Auto-scan for ThirdPartyApps skipped (import.meta.glob not supported).');
-    return [];
+  if (!meta || typeof meta.glob !== 'function') {
+    console.warn('System: Auto-scan for ThirdPartyApps skipped (import.meta.glob not supported). Using manual registry.');
+    return manualRegistry;
   }
 
   try {
@@ -73,7 +84,8 @@ export const scanThirdPartyApps = (): ThirdPartyAppDefinition[] => {
     
   } catch (error) {
     console.error('[System] Failed to scan third-party apps:', error);
+    return manualRegistry;
   }
 
-  return apps;
+  return apps.length > 0 ? apps : manualRegistry;
 };

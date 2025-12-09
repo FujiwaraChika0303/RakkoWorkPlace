@@ -72,6 +72,32 @@ class FileSystemService {
     window.dispatchEvent(new Event('fs-update'));
   }
 
+  private formatSize(bytes: number): string {
+    if (bytes === 0) return '0 KB';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    
+    // For very small files, show as 1 KB if it's > 0 but < 1024 in logic usually, 
+    // but here let's be precise or default to KB for consistency
+    if (i < 1) return `${Math.max(1, Math.ceil(bytes / 1024))} KB`;
+    
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+  }
+
+  private detectFileType(name: string): 'image' | 'text' | 'unknown' {
+      const ext = name.split('.').pop()?.toLowerCase();
+      if (!ext) return 'unknown';
+      
+      const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'ico', 'svg', 'bmp'];
+      const textExts = ['txt', 'md', 'json', 'js', 'ts', 'tsx', 'jsx', 'html', 'css', 'csv', 'xml', 'log'];
+      
+      if (imageExts.includes(ext)) return 'image';
+      if (textExts.includes(ext)) return 'text';
+      
+      return 'unknown';
+  }
+
   // --- Public API ---
 
   public getDirectory(path: string): FileSystemItem[] {
@@ -94,7 +120,7 @@ class FileSystemService {
       return file?.url;
   }
 
-  public createFile(path: string, name: string, type: 'file' | 'folder', content: string = '', url?: string): void {
+  public createFile(path: string, name: string, type: 'file' | 'folder', content: string = '', url?: string, sizeInBytes?: number): void {
     if (!path.startsWith('/C')) throw new Error("Permission Denied: Read-only File System");
     
     if (!this.cDrive[path]) this.cDrive[path] = [];
@@ -106,18 +132,35 @@ class FileSystemService {
         const parts = name.split('.');
         if (parts.length > 1) {
             const ext = parts.pop();
-            finalName = `${parts.join('.')} (${counter}).${ext}`;
+            finalName = `${parts.slice(0, -1).join('.')} (${counter}).${ext}`;
         } else {
             finalName = `${name} (${counter})`;
         }
         counter++;
     }
 
+    // Determine Size
+    let sizeStr = '0 KB';
+    if (type === 'file') {
+        if (sizeInBytes !== undefined) {
+            sizeStr = this.formatSize(sizeInBytes);
+        } else if (url && url.startsWith('data:')) {
+            // Estimate size from Base64 string if explicit size not provided
+            const base64Length = url.split(',')[1]?.length || 0;
+            const estimatedBytes = Math.ceil(base64Length * 3 / 4); 
+            sizeStr = this.formatSize(estimatedBytes);
+        } else if (content) {
+            sizeStr = this.formatSize(content.length);
+        } else {
+            sizeStr = 'Unknown';
+        }
+    }
+
     const newItem: FileSystemItem = {
       name: finalName,
       type,
-      fileType: type === 'file' ? (finalName.match(/\.(jpg|jpeg|png|gif|webp)$/i) ? 'image' : 'text') : undefined,
-      size: type === 'file' ? (url ? 'Unknown' : `${Math.ceil(content.length / 1024)} KB`) : undefined,
+      fileType: type === 'file' ? this.detectFileType(finalName) : undefined,
+      size: type === 'file' ? sizeStr : undefined,
       date: new Date().toISOString().split('T')[0],
       content: content,
       url: url,
@@ -170,9 +213,22 @@ class FileSystemService {
     if (!file) throw new Error("File not found");
 
     file.content = newContent;
-    file.size = `${Math.ceil(newContent.length / 1024)} KB`;
+    file.size = this.formatSize(newContent.length);
     file.date = new Date().toISOString().split('T')[0];
 
+    this.saveCDrive();
+  }
+
+  public updateFileMetadata(path: string, name: string, updates: Partial<FileSystemItem>): void {
+    if (!path.startsWith('/C')) throw new Error("Permission Denied: Read-only File System");
+    
+    const dir = this.cDrive[path];
+    if (!dir) throw new Error("Path not found");
+
+    const file = dir.find(f => f.name === name);
+    if (!file) throw new Error("File not found");
+
+    Object.assign(file, updates);
     this.saveCDrive();
   }
 
@@ -190,6 +246,11 @@ class FileSystemService {
     const newPath = `${path}/${newName}`;
 
     file.name = newName;
+    
+    // Update file type based on new extension
+    if (file.type === 'file') {
+        file.fileType = this.detectFileType(newName);
+    }
 
     // If folder, we need to rename keys in the cDrive object
     if (file.type === 'folder') {
@@ -229,16 +290,23 @@ class FileSystemService {
       if (!file) throw new Error("File not found");
 
       // 2. Create in Dest
-      // We leverage create file which handles duplicates logic
-      // Note: This is a shallow copy for folders (it creates empty folder). 
-      // Deep copy for folders is complex in this flat structure, simplifying to create empty folder for now if folder.
+      // We pass undefined for size to recalculate or we can pass raw size if we stored bytes, 
+      // but we store formatted string. Ideally we should store bytes but for now we regenerate or copy size string?
+      // createFile calculates size from content or URL. 
+      // If we are copying a file, we want to preserve attributes.
+      // But createFile API is slightly higher level. 
+      // Let's modify logic to just insert the object clone for copy to ensure fidelity, then handle rename logic.
+      
+      // Since createFile handles duplicate naming, let's use it but perhaps we need to parse the size string back to bytes? 
+      // Or just trust createFile's calculation again.
       this.createFile(destPath, file.name, file.type, file.content || '', file.url);
+      
+      // Note: If the file was "Unknown" size before, it will stay Unknown unless we have data to calculate.
   }
 
   public getAllWallpapers(): FileSystemItem[] {
     // Aggregate wallpapers from System + potentially C drive if user adds some
     const systemWalls = SYSTEM_FILES['/System/Wallpapers'] || [];
-    // User wallpapers? (Assumes user puts them in /C/Documents/Wallpapers for example, or we just filter all images)
     return systemWalls;
   }
 }

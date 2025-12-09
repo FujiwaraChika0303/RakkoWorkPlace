@@ -16,6 +16,7 @@ interface TaskbarProps {
   onToggleStartMenu: () => void;
   onAppClick: (id: AppId) => void;
   onAppContextMenu: (e: React.MouseEvent, id: AppId) => void;
+  onTaskbarContextMenu: (e: React.MouseEvent) => void;
   onCloseApp: (id: AppId) => void;
   onToggleTaskView: () => void;
   onToggleTheme: () => void;
@@ -34,6 +35,7 @@ export const Taskbar: React.FC<TaskbarProps> = ({
   onToggleStartMenu,
   onAppClick,
   onAppContextMenu,
+  onTaskbarContextMenu,
   onCloseApp,
   onToggleTaskView,
   onToggleTheme,
@@ -72,7 +74,6 @@ export const Taskbar: React.FC<TaskbarProps> = ({
           .filter(Boolean) as typeof installedApps;
       
       // 2. Get Running Apps (Grouped)
-      // Special logic for Browser: Group all browser-* windows under generic BROWSER id
       const runningIds = new Set<string>();
       (Object.values(openWindows) as WindowState[]).forEach(win => {
           if (win.isOpen) {
@@ -101,7 +102,7 @@ export const Taskbar: React.FC<TaskbarProps> = ({
         const isActive = browserWindows.some(w => activeApp === w.id);
         const isOnCurrentDesktop = browserWindows.some(w => w.desktopId === currentDesktop);
         
-        // Use first window for preview if available, or just nothing for now
+        // Use first window for preview if available
         const previewUrl = browserWindows[0]?.previewUrl;
         
         return {
@@ -150,7 +151,10 @@ export const Taskbar: React.FC<TaskbarProps> = ({
       style={{ transform: transformStyle }}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
-      onContextMenu={(e) => e.preventDefault()}
+      onContextMenu={(e) => {
+          e.preventDefault();
+          onTaskbarContextMenu(e);
+      }}
     >
       <div 
         className={`absolute inset-0 flex items-center px-2 pointer-events-none ${
@@ -165,6 +169,7 @@ export const Taskbar: React.FC<TaskbarProps> = ({
               ${isStartMenuOpen ? 'bg-indigo-600 shadow-[0_0_15px_rgba(79,70,229,0.5)]' : 'hover:bg-white/10'}
             `}
             title="Start"
+            onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
           >
             <Hexagon 
               size={24} 
@@ -198,6 +203,7 @@ export const Taskbar: React.FC<TaskbarProps> = ({
             onClick={onToggleTaskView}
             className="p-2 rounded hover:bg-white/10 text-gray-400 hover:text-white transition-colors"
             title="Task View"
+            onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
           >
             <LayoutTemplate size={18} />
           </button>
@@ -224,7 +230,11 @@ export const Taskbar: React.FC<TaskbarProps> = ({
                 <button
                   key={app.id}
                   onClick={() => onAppClick(app.id)}
-                  onContextMenu={(e) => onAppContextMenu(e, app.id)}
+                  onContextMenu={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation(); // Prevent bubbling to taskbar background
+                      onAppContextMenu(e, app.id);
+                  }}
                   onMouseEnter={(e) => handleMouseEnterApp(e, app.id)}
                   onMouseLeave={handleMouseLeaveApp}
                   className={`
