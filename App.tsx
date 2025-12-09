@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { MessageSquare, Image as ImageIcon, Info, Hexagon, Settings, Folder, FileText, Sun, Moon, HelpCircle, Monitor, Grid, Type, Calendar, HardDrive, Plus, RefreshCw, Check, Trash2, X, Maximize2, Edit3, ExternalLink, Pin, PinOff, Activity, LayoutTemplate } from 'lucide-react';
+import { MessageSquare, Image as ImageIcon, Info, Hexagon, Settings, Folder, FileText, Sun, Moon, HelpCircle, Monitor, Grid, Type, Calendar, HardDrive, Plus, RefreshCw, Check, Trash2, X, Maximize2, Edit3, ExternalLink, Pin, PinOff, Activity, LayoutTemplate, Box } from 'lucide-react';
 import { Window } from './components/ui/Window';
 import { StartMenu } from './components/ui/StartMenu';
 import { Taskbar } from './components/ui/Taskbar';
@@ -15,12 +15,14 @@ import { ControlPanelApp } from './components/apps/ControlPanelApp';
 import { TextEditorApp } from './components/apps/TextEditorApp';
 import { HelpApp } from './components/apps/HelpApp';
 import { TaskManagerApp } from './components/apps/TaskManagerApp';
+import { IframeApp } from './components/apps/IframeApp';
 import { fsService } from './services/fileSystemService';
 import { processRegistry } from './services/processRegistry';
 import { useSystemProcess } from './hooks/useSystemProcess';
+import { loadThirdPartyApps, ThirdPartyAppDefinition } from './services/thirdPartyAppsService';
 
-// --- APP REGISTRY ---
-const INSTALLED_APPS = [
+// --- SYSTEM APP REGISTRY ---
+const SYSTEM_APPS = [
   { id: AppId.PICTURE_VIEWER, label: 'Picture Studio', icon: <ImageIcon size={20} className="text-pink-400" /> },
   { id: AppId.HELP, label: 'Help Center', icon: <HelpCircle size={20} className="text-orange-400" /> },
   { id: AppId.FILE_MANAGER, label: 'File Manager', icon: <Folder size={20} className="text-yellow-400" /> },
@@ -31,7 +33,7 @@ const INSTALLED_APPS = [
   { id: AppId.ABOUT, label: 'About Rakko', icon: <Info size={20} className="text-blue-400" /> },
 ];
 
-const INITIAL_WINDOWS: Record<AppId, WindowState> = {
+const INITIAL_WINDOWS: Record<string, WindowState> = {
   [AppId.CHAT]: { id: AppId.CHAT, isOpen: false, isMinimized: false, zIndex: 1, position: { x: 100, y: 100 }, desktopId: 0 },
   [AppId.GALLERY]: { id: AppId.GALLERY, isOpen: false, isMinimized: false, zIndex: 1, position: { x: 150, y: 150 }, desktopId: 0 },
   [AppId.ABOUT]: { id: AppId.ABOUT, isOpen: false, isMinimized: false, zIndex: 1, position: { x: 200, y: 200 }, desktopId: 0 },
@@ -55,11 +57,14 @@ const App: React.FC = () => {
     type: 'kernel'
   });
 
-  const [windows, setWindows] = useState<Record<AppId, WindowState>>(INITIAL_WINDOWS);
-  const [activeApp, setActiveApp] = useState<AppId | null>(null);
+  const [windows, setWindows] = useState<Record<string, WindowState>>(INITIAL_WINDOWS);
+  const [activeApp, setActiveApp] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [isStartMenuOpen, setIsStartMenuOpen] = useState(false);
   
+  // Third Party Apps State
+  const [thirdPartyApps, setThirdPartyApps] = useState<ThirdPartyAppDefinition[]>([]);
+
   // New States for Task View & Desktops
   const [isTaskViewOpen, setIsTaskViewOpen] = useState(false);
   const [currentDesktop, setCurrentDesktop] = useState(0); // 0 or 1
@@ -76,7 +81,7 @@ const App: React.FC = () => {
   const [iconPositions, setIconPositions] = useState<Record<string, {x: number, y: number}>>({});
   
   // Taskbar Pinned Apps State
-  const [pinnedAppIds, setPinnedAppIds] = useState<AppId[]>(() => {
+  const [pinnedAppIds, setPinnedAppIds] = useState<string[]>(() => {
     const saved = localStorage.getItem('rakko_pinned_apps');
     if (saved) {
         try { return JSON.parse(saved); } catch { return []; }
@@ -118,6 +123,27 @@ const App: React.FC = () => {
     role: 'Administrator',
     avatarColor: 'bg-indigo-500'
   });
+
+  // Load Third Party Apps on mount
+  useEffect(() => {
+    const loadedApps = loadThirdPartyApps();
+    setThirdPartyApps(loadedApps);
+  }, []);
+
+  // Merged App List
+  const allInstalledApps = useMemo(() => {
+    // Map Third Party Definitions to App UI Format
+    const dynamicApps = thirdPartyApps.map(app => ({
+      id: app.id,
+      label: app.label,
+      icon: app.iconUrl ? (
+        <img src={app.iconUrl} className="w-full h-full object-contain pointer-events-none" alt={app.label} />
+      ) : (
+        <HelpCircle size={20} className="text-indigo-300" />
+      )
+    }));
+    return [...SYSTEM_APPS, ...dynamicApps];
+  }, [thirdPartyApps]);
 
   // --- Process Registry Command Listener ---
   useEffect(() => {
@@ -227,7 +253,7 @@ const App: React.FC = () => {
   // 1. Unified Desktop Items (Apps + Files)
   const allDesktopItems = useMemo(() => {
     const items = [
-      ...INSTALLED_APPS.map(app => ({ 
+      ...allInstalledApps.map(app => ({ 
           type: 'app' as const, 
           id: app.id as string, 
           label: app.label, 
@@ -257,7 +283,7 @@ const App: React.FC = () => {
         return 0;
     });
 
-  }, [desktopFiles, sortOption]);
+  }, [desktopFiles, sortOption, allInstalledApps]);
 
   const rearrangeIcons = () => {
       let gridSize = 104;
@@ -299,11 +325,16 @@ const App: React.FC = () => {
     setWindows(prev => {
       const windowsList = Object.values(prev) as WindowState[];
       const maxZ = Math.max(0, ...windowsList.map(w => w.zIndex));
-      if (prev[id].zIndex === maxZ && activeApp === id) return prev;
+      if (prev[id] && prev[id].zIndex === maxZ && activeApp === id) return prev;
       
       return {
         ...prev,
-        [id]: { ...prev[id], zIndex: maxZ + 1 }
+        [id]: { 
+            ...(prev[id] || { 
+                id, isOpen: false, isMinimized: false, zIndex: 0, position: {x:100,y:100}, desktopId: 0 
+            }), 
+            zIndex: maxZ + 1 
+        }
       };
     });
     setActiveApp(id);
@@ -311,17 +342,15 @@ const App: React.FC = () => {
 
   const openApp = (id: AppId, data?: any) => {
     setWindows(prev => {
-      const isOpen = prev[id].isOpen;
+      // Check if window exists
+      const existing = prev[id];
+      const newState: WindowState = existing 
+          ? { ...existing, isOpen: true, isMinimized: false, desktopId: currentDesktop, data: data !== undefined ? data : existing.data }
+          : { id, isOpen: true, isMinimized: false, zIndex: 1, position: { x: 100 + Math.random()*50, y: 100 + Math.random()*50 }, desktopId: currentDesktop, data };
       
       return {
         ...prev,
-        [id]: { 
-          ...prev[id], 
-          isOpen: true, 
-          isMinimized: false,
-          desktopId: currentDesktop,
-          data: data !== undefined ? data : prev[id].data 
-        }
+        [id]: newState
       };
     });
     bringToFront(id);
@@ -361,7 +390,7 @@ const App: React.FC = () => {
   const handleTaskbarAppClick = (id: AppId) => {
     const w = windows[id];
     
-    if (!w.isOpen) {
+    if (!w || !w.isOpen) {
         openApp(id);
     } else if (w.isMinimized) {
         setWindows(prev => ({ ...prev, [id]: { ...prev[id], isMinimized: false, desktopId: currentDesktop } }));
@@ -555,6 +584,14 @@ const App: React.FC = () => {
   };
 
   const renderAppContent = (id: AppId, data?: any) => {
+    // Check if it's a third-party app
+    if (id.startsWith('third_party_')) {
+       const thirdPartyApp = thirdPartyApps.find(app => app.id === id);
+       if (thirdPartyApp) {
+           return <IframeApp src={thirdPartyApp.url} title={thirdPartyApp.label} />;
+       }
+    }
+
     switch (id) {
       case AppId.GALLERY: 
         return <GalleryApp onOpenImage={(url, title) => openApp(AppId.PICTURE_VIEWER, { url, title })} />;
@@ -593,7 +630,7 @@ const App: React.FC = () => {
     if (windowState.id === AppId.TEXT_EDITOR && windowState.data?.initialFileName) {
         return `Editor - ${windowState.data.initialFileName}`;
     }
-    const appDef = INSTALLED_APPS.find(a => a.id === windowState.id);
+    const appDef = allInstalledApps.find(a => a.id === windowState.id);
     return appDef ? appDef.label : windowState.id;
   };
 
@@ -638,7 +675,7 @@ const App: React.FC = () => {
     if (activeContextMenu.type === 'taskbar') {
         const { id } = activeContextMenu.data;
         const pinned = isAppPinned(id);
-        const isOpen = windows[id].isOpen;
+        const isOpen = windows[id] && windows[id].isOpen;
         
         items = [
             {
@@ -832,7 +869,7 @@ const App: React.FC = () => {
         <StartMenu 
             isOpen={isStartMenuOpen}
             user={currentUser}
-            apps={INSTALLED_APPS}
+            apps={allInstalledApps}
             onOpenApp={openApp}
             onShutdown={() => window.location.reload()}
             onClose={() => setIsStartMenuOpen(false)}
@@ -846,7 +883,7 @@ const App: React.FC = () => {
         <TaskView 
             isOpen={isTaskViewOpen}
             windows={Object.values(windows)}
-            apps={INSTALLED_APPS.map(app => ({...app, title: app.label, component: null}))}
+            apps={allInstalledApps.map(app => ({...app, title: app.label, component: null}))}
             currentDesktop={currentDesktop}
             onClose={() => setIsTaskViewOpen(false)}
             onSelectWindow={(id) => handleTaskbarAppClick(id)}
@@ -854,13 +891,13 @@ const App: React.FC = () => {
             onSwitchDesktop={setCurrentDesktop}
             onMoveWindowToDesktop={moveWindowToDesktop}
             renderWindowContent={(id) => {
-                const previewUrl = windows[id].previewUrl;
+                const previewUrl = windows[id]?.previewUrl;
                 if (previewUrl) {
                     return <img src={previewUrl} className="w-full h-full object-contain pointer-events-none" draggable={false} alt="Preview"/>;
                 }
                 return (
                     <div className="w-full h-full bg-slate-900 text-slate-200 rounded-lg overflow-hidden relative pointer-events-none">
-                        {renderAppContent(id, windows[id].data)}
+                        {renderAppContent(id, windows[id]?.data)}
                     </div>
                 );
             }}
@@ -870,7 +907,7 @@ const App: React.FC = () => {
       {/* Taskbar */}
       {!disabledProcesses.has('ui:taskbar') && (
         <Taskbar 
-            installedApps={INSTALLED_APPS}
+            installedApps={allInstalledApps}
             pinnedAppIds={pinnedAppIds}
             openWindows={windows}
             activeApp={activeApp}
@@ -886,7 +923,7 @@ const App: React.FC = () => {
             onToggleTheme={toggleTheme}
             renderWindowContent={(id) => (
                 <div className="w-full h-full bg-slate-900 text-slate-200 rounded-lg overflow-hidden relative pointer-events-none">
-                    {renderAppContent(id, windows[id].data)}
+                    {renderAppContent(id, windows[id]?.data)}
                 </div>
             )}
         />

@@ -1,17 +1,20 @@
 import { ReactNode } from 'react';
 
-export enum AppId {
-  CHAT = 'chat',
-  GALLERY = 'gallery',
-  ABOUT = 'about',
-  SETTINGS = 'settings',
-  PICTURE_VIEWER = 'picture_viewer',
-  FILE_MANAGER = 'file_manager',
-  CONTROL_PANEL = 'control_panel',
-  TEXT_EDITOR = 'text_editor',
-  HELP = 'help',
-  TASK_MANAGER = 'task_manager'
-}
+// Converted from enum to const object + type to allow dynamic IDs (Third Party Apps)
+export const AppId = {
+  CHAT: 'chat',
+  GALLERY: 'gallery',
+  ABOUT: 'about',
+  SETTINGS: 'settings',
+  PICTURE_VIEWER: 'picture_viewer',
+  FILE_MANAGER: 'file_manager',
+  CONTROL_PANEL: 'control_panel',
+  TEXT_EDITOR: 'text_editor',
+  HELP: 'help',
+  TASK_MANAGER: 'task_manager'
+} as const;
+
+export type AppId = typeof AppId[keyof typeof AppId] | string;
 
 export interface AppConfig {
   id: AppId;
@@ -86,5 +89,4 @@ export interface MenuItem {
   disabled?: boolean;
   danger?: boolean;
   separator?: boolean;
-  // Simple submenu support could be added here, but keeping flat for now
 }

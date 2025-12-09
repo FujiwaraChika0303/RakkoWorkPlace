@@ -321,7 +321,7 @@ export const Taskbar: React.FC<TaskbarProps> = ({
 };
 
 // Search Overlay Component
-const SearchOverlay: React.FC<{ apps: any[], onClose: () => void, onOpenApp: (id: AppId) => void, position: 'top'|'bottom' }> = ({ apps, onClose, onOpenApp, position }) => {
+const SearchOverlay: React.FC<{ apps: any[], onClose: () => void, onOpenApp: (id: AppId) => void, position: 'top'|'bottom' }> = ({ apps = [], onClose, onOpenApp, position }) => {
     const [query, setQuery] = useState('');
     const inputRef = useRef<HTMLInputElement>(null);
 
@@ -349,8 +349,9 @@ const SearchOverlay: React.FC<{ apps: any[], onClose: () => void, onOpenApp: (id
 
     return (
         <div 
-            className={`search-overlay absolute left-0 w-80 bg-glass-dark backdrop-blur-xl border border-white/10 rounded-xl shadow-2xl p-4 z-[80] animate-pop
+            className={`search-overlay absolute left-0 w-80 bg-[#121212]/95 backdrop-blur-xl border border-white/10 rounded-xl shadow-2xl p-4 z-[80] animate-pop
             ${position === 'top' ? 'top-12' : 'bottom-12'}`}
+            onClick={(e) => e.stopPropagation()}
         >
             <div className="flex items-center gap-2 bg-black/40 border border-white/10 rounded-lg px-3 py-2.5 mb-3">
                 <Search size={16} className="text-indigo-400" />
