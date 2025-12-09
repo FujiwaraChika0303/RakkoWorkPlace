@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { MenuItem } from '../../types';
 import { ChevronRight } from 'lucide-react';
+import { useSystemProcess } from '../../hooks/useSystemProcess';
 
 interface ContextMenuProps {
   x: number;
@@ -11,14 +12,18 @@ interface ContextMenuProps {
 }
 
 export const ContextMenu: React.FC<ContextMenuProps> = ({ x, y, items, onClose }) => {
-  const menuRef = useRef<HTMLDivElement>(null);
+  const { elementRef } = useSystemProcess({
+    id: 'ui:context-menu',
+    name: 'Context Menu Service',
+    type: 'ui'
+  });
+
   const [position, setPosition] = useState({ x, y });
   const [isVisible, setIsVisible] = useState(false);
 
   useEffect(() => {
-    // Adjust position to keep within viewport
-    if (menuRef.current) {
-      const rect = menuRef.current.getBoundingClientRect();
+    if (elementRef.current) {
+      const rect = elementRef.current.getBoundingClientRect();
       let newX = x;
       let newY = y;
 
@@ -34,14 +39,12 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({ x, y, items, onClose }
     }
   }, [x, y]);
 
-  // Click outside listener
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+      if (elementRef.current && !elementRef.current.contains(e.target as Node)) {
         onClose();
       }
     };
-    // Use mousedown for immediate response, prevents dragging interactions elsewhere
     window.addEventListener('mousedown', handleClickOutside);
     window.addEventListener('resize', onClose);
     return () => {
@@ -53,7 +56,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({ x, y, items, onClose }
   return createPortal(
     <div className="fixed inset-0 z-[9998]" onContextMenu={(e) => { e.preventDefault(); onClose(); }}>
       <div
-        ref={menuRef}
+        ref={elementRef}
         className={`fixed z-[9999] min-w-[200px] bg-glass-panel backdrop-blur-xl border border-glass-border rounded-lg shadow-[0_10px_40px_rgba(0,0,0,0.5)] py-1.5 flex flex-col text-sm text-glass-text origin-top-left transition-opacity duration-150 ${isVisible ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`}
         style={{
           top: position.y,

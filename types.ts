@@ -9,7 +9,8 @@ export enum AppId {
   FILE_MANAGER = 'file_manager',
   CONTROL_PANEL = 'control_panel',
   TEXT_EDITOR = 'text_editor',
-  HELP = 'help'
+  HELP = 'help',
+  TASK_MANAGER = 'task_manager'
 }
 
 export interface AppConfig {

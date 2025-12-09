@@ -3,6 +3,7 @@ import {
   Moon, Sun, Maximize, Minimize, 
   Eye, BookOpen, Settings, User
 } from 'lucide-react';
+import { useSystemProcess } from '../../hooks/useSystemProcess';
 
 interface QuickSettingsProps {
   isOpen: boolean;
@@ -21,11 +22,16 @@ export const QuickSettings: React.FC<QuickSettingsProps> = ({
   toggleTheme,
   onOpenSettings
 }) => {
+  const { elementRef } = useSystemProcess({
+    id: 'ui:quick-settings',
+    name: 'Quick Settings Overlay',
+    type: 'ui'
+  }, isOpen);
+
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [nightLight, setNightLight] = useState(false);
   const [readingMode, setReadingMode] = useState(false);
 
-  // Initial Sync
   useEffect(() => {
     if (isOpen) {
         setIsFullscreen(!!document.fullscreenElement);
@@ -34,7 +40,6 @@ export const QuickSettings: React.FC<QuickSettingsProps> = ({
     }
   }, [isOpen]);
 
-  // Effects for Global Toggles
   useEffect(() => {
       if (nightLight) document.body.classList.add('night-light');
       else document.body.classList.remove('night-light');
@@ -68,6 +73,7 @@ export const QuickSettings: React.FC<QuickSettingsProps> = ({
     <>
       <div className="fixed inset-0 z-[60]" onClick={onClose} />
       <div 
+        ref={elementRef}
         className={`fixed w-[320px] bg-gray-900/60 backdrop-blur-2xl border border-white/10 rounded-2xl shadow-2xl p-4 z-[70] animate-pop text-gray-200 ${positionClass}`}
       >
         <div className="grid grid-cols-2 gap-3 mb-6">

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, ArrowRight, Layout, Trash2, Maximize2 } from 'lucide-react';
 import { AppId, WindowState, AppConfig } from '../../types';
+import { useSystemProcess } from '../../hooks/useSystemProcess';
 
 interface TaskViewProps {
   isOpen: boolean;
@@ -31,7 +32,12 @@ export const TaskView: React.FC<TaskViewProps> = ({
   const [dragOverDesktop, setDragOverDesktop] = useState<number | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number, windowId: AppId } | null>(null);
 
-  // Handle entry/exit animation
+  const { elementRef } = useSystemProcess({
+    id: 'ui:task-view',
+    name: 'Task View Host',
+    type: 'ui'
+  }, shouldRender);
+
   useEffect(() => {
     if (isOpen) {
       setShouldRender(true);
@@ -41,7 +47,6 @@ export const TaskView: React.FC<TaskViewProps> = ({
     }
   }, [isOpen]);
 
-  // Close context menu on global click
   useEffect(() => {
     const handleClick = () => setContextMenu(null);
     window.addEventListener('click', handleClick);
@@ -50,10 +55,8 @@ export const TaskView: React.FC<TaskViewProps> = ({
 
   if (!shouldRender) return null;
 
-  // Filter windows for the current desktop
   const desktopWindows = windows.filter(w => w.isOpen && w.desktopId === currentDesktop);
 
-  // --- Drag and Drop Handlers ---
   const handleDragStart = (e: React.DragEvent, windowId: AppId) => {
     e.dataTransfer.setData('windowId', windowId);
     e.dataTransfer.effectAllowed = 'move';
@@ -65,7 +68,6 @@ export const TaskView: React.FC<TaskViewProps> = ({
   };
 
   const handleDragLeave = () => {
-      // Optional: Logic to reset dragOver if leaving the container
   };
 
   const handleDrop = (e: React.DragEvent, desktopId: number) => {
@@ -91,6 +93,7 @@ export const TaskView: React.FC<TaskViewProps> = ({
 
   return (
     <div 
+        ref={elementRef}
         className={`
             fixed inset-0 z-[80] bg-black/60 backdrop-blur-2xl flex flex-col select-none 
             transition-all duration-300 ease-in-out
@@ -98,7 +101,6 @@ export const TaskView: React.FC<TaskViewProps> = ({
         `}
         onClick={handleBackdropClick}
     >
-      {/* Close Button */}
       <button 
         onClick={onClose}
         className="absolute top-6 right-8 p-3 rounded-full bg-white/10 text-white hover:bg-white/20 transition-all hover:rotate-90 z-50 shadow-lg"
@@ -107,7 +109,6 @@ export const TaskView: React.FC<TaskViewProps> = ({
         <X size={24} />
       </button>
 
-      {/* 1. Desktop Switcher / Drop Zones */}
       <div className="h-48 flex items-center justify-center gap-8 pt-12 pb-4 shrink-0" onClick={(e) => e.stopPropagation()}>
         {[0, 1].map(idx => (
           <div
@@ -129,7 +130,6 @@ export const TaskView: React.FC<TaskViewProps> = ({
                 Desktop {idx + 1}
             </div>
             
-            {/* Visual Representation */}
             <div className="flex gap-1.5">
                <div className={`w-16 h-10 rounded border transition-colors ${currentDesktop === idx ? 'bg-indigo-500/20 border-indigo-500/50' : 'bg-gray-800 border-gray-700'}`}></div>
             </div>
@@ -143,10 +143,9 @@ export const TaskView: React.FC<TaskViewProps> = ({
         ))}
       </div>
 
-      {/* 2. Window Grid */}
       <div 
         className="flex-1 overflow-y-auto px-12 py-8 custom-scrollbar"
-        onClick={handleBackdropClick} // Allow clicking empty space in scroll area to close
+        onClick={handleBackdropClick}
       >
         <h2 className="text-2xl font-serif text-white/50 text-center mb-12 tracking-[0.2em] mix-blend-overlay pointer-events-none">
           {desktopWindows.length === 0 ? 'NO ACTIVE TASKS' : 'ACTIVE TASKS'}
@@ -154,7 +153,7 @@ export const TaskView: React.FC<TaskViewProps> = ({
         
         <div 
             className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-8 max-w-[90rem] mx-auto pb-20"
-            onClick={(e) => e.stopPropagation()} // Prevent grid clicks from closing, let items handle it
+            onClick={(e) => e.stopPropagation()} 
         >
           {desktopWindows.map((win, idx) => {
             const appDef = apps.find(a => a.id === win.id);
@@ -171,7 +170,6 @@ export const TaskView: React.FC<TaskViewProps> = ({
                     animation: `fadeIn 0.4s ease-out ${idx * 0.05}s backwards`
                 }}
               >
-                {/* Thumbnail */}
                 <div 
                   onClick={() => { onSelectWindow(win.id); onClose(); }}
                   className="
@@ -180,7 +178,6 @@ export const TaskView: React.FC<TaskViewProps> = ({
                     group-hover:border-indigo-500/60 group-hover:shadow-[0_20px_50px_rgba(0,0,0,0.5)] group-hover:-translate-y-2 group-hover:scale-[1.02]
                   "
                 >
-                  {/* Header */}
                   <div className="h-8 bg-[#151515] border-b border-white/5 flex items-center px-3 gap-2 justify-between">
                      <div className="flex items-center gap-1.5 opacity-50 group-hover:opacity-100 transition-opacity">
                          <div className="w-2.5 h-2.5 rounded-full bg-red-500"></div>
@@ -192,14 +189,12 @@ export const TaskView: React.FC<TaskViewProps> = ({
                      </div>
                   </div>
 
-                  {/* Preview Content */}
                   <div className="absolute top-8 left-0 right-0 bottom-0 bg-black overflow-hidden">
                      <div className="w-[400%] h-[400%] origin-top-left scale-[0.25] pointer-events-none select-none p-4 opacity-80 group-hover:opacity-100 transition-opacity grayscale-[30%] group-hover:grayscale-0">
                         {renderWindowContent(win.id)}
                      </div>
                   </div>
                   
-                  {/* Close Button Overlay */}
                   <button
                     onClick={(e) => { e.stopPropagation(); onCloseWindow(win.id); }}
                     className="
@@ -214,7 +209,6 @@ export const TaskView: React.FC<TaskViewProps> = ({
                   </button>
                 </div>
 
-                {/* Title Label */}
                 <div className="text-center">
                    <span className="text-sm text-gray-400 font-medium group-hover:text-white transition-colors shadow-black drop-shadow-md bg-black/40 px-3 py-1 rounded-full border border-transparent group-hover:border-white/10">
                     {appDef.title}
@@ -226,7 +220,6 @@ export const TaskView: React.FC<TaskViewProps> = ({
         </div>
       </div>
       
-      {/* Context Menu */}
       {contextMenu && (
           <div 
              className="fixed z-[100] w-60 bg-[#1a1a1a]/95 backdrop-blur-xl border border-white/10 rounded-xl shadow-[0_20px_60px_rgba(0,0,0,0.7)] py-2 animate-pop origin-top-left flex flex-col"
@@ -275,7 +268,6 @@ export const TaskView: React.FC<TaskViewProps> = ({
           </div>
       )}
       
-      {/* Context Menu Overlay */}
       {contextMenu && <div className="fixed inset-0 z-[99]" onClick={() => setContextMenu(null)} />}
     </div>
   );

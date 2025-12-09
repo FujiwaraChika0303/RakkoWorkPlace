@@ -1,6 +1,7 @@
 import React from 'react';
 import { Power, Hexagon } from 'lucide-react';
 import { AppId, UserProfile } from '../../types';
+import { useSystemProcess } from '../../hooks/useSystemProcess';
 
 interface AppDefinition {
     id: AppId;
@@ -20,6 +21,12 @@ interface StartMenuProps {
 }
 
 export const StartMenu: React.FC<StartMenuProps> = ({ isOpen, user, apps, onOpenApp, onShutdown, onClose, position = 'bottom', onAppContextMenu }) => {
+  const { elementRef } = useSystemProcess({
+      id: 'ui:start-menu',
+      name: 'Start Menu',
+      type: 'ui'
+  }, isOpen);
+
   if (!isOpen) return null;
 
   const positionClass = position === 'top' 
@@ -28,12 +35,12 @@ export const StartMenu: React.FC<StartMenuProps> = ({ isOpen, user, apps, onOpen
 
   return (
     <>
-      {/* Click outside backdrop */}
       <div className="fixed inset-0 z-[60]" onClick={onClose} />
       
-      {/* Menu */}
-      <div className={`fixed left-4 width-80 w-80 bg-glass-dark backdrop-blur-2xl border border-white/10 rounded-xl shadow-2xl z-[70] overflow-hidden flex flex-col animate-fade-in ${positionClass}`}>
-        {/* User Profile Header */}
+      <div 
+        ref={elementRef}
+        className={`fixed left-4 width-80 w-80 bg-glass-dark backdrop-blur-2xl border border-white/10 rounded-xl shadow-2xl z-[70] overflow-hidden flex flex-col animate-fade-in ${positionClass}`}
+      >
         <div className="p-6 bg-gradient-to-r from-gray-900 to-black border-b border-white/10 flex items-center gap-4">
           <div className={`w-12 h-12 rounded-full flex items-center justify-center text-white border-2 border-white/20 font-bold shadow-lg ${user.avatarColor}`}>
             {user.name.charAt(0)}
@@ -48,7 +55,6 @@ export const StartMenu: React.FC<StartMenuProps> = ({ isOpen, user, apps, onOpen
             <div className="text-[10px] text-gray-500 uppercase tracking-widest font-bold mt-4 mb-2">Applications</div>
         </div>
 
-        {/* App List */}
         <div className="px-3 pb-4 space-y-1 max-h-[300px] overflow-y-auto">
           {apps.map((app) => (
             <button
@@ -72,7 +78,6 @@ export const StartMenu: React.FC<StartMenuProps> = ({ isOpen, user, apps, onOpen
           ))}
         </div>
 
-        {/* Footer */}
         <div className="mt-auto p-4 border-t border-white/10 bg-black/60 flex justify-between items-center">
           <div className="flex items-center gap-2 text-gray-500">
              <Hexagon size={14} className="fill-gray-700" />
