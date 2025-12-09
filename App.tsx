@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { MessageSquare, Image as ImageIcon, Info, Hexagon, Settings, Folder, FileText, Sun, Moon, HelpCircle } from 'lucide-react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
+import { MessageSquare, Image as ImageIcon, Info, Hexagon, Settings, Folder, FileText, Sun, Moon, HelpCircle, Monitor, Grid, Type, Calendar, HardDrive, Plus, RefreshCw, Check, Trash2, X, Maximize2, Edit3, ExternalLink } from 'lucide-react';
 import { Window } from './components/ui/Window';
 import { StartMenu } from './components/ui/StartMenu';
 import { Taskbar } from './components/ui/Taskbar';
@@ -30,13 +31,16 @@ const INITIAL_WINDOWS: Record<AppId, WindowState> = {
   [AppId.CHAT]: { id: AppId.CHAT, isOpen: false, isMinimized: false, zIndex: 1, position: { x: 100, y: 100 }, desktopId: 0 },
   [AppId.GALLERY]: { id: AppId.GALLERY, isOpen: false, isMinimized: false, zIndex: 1, position: { x: 150, y: 150 }, desktopId: 0 },
   [AppId.ABOUT]: { id: AppId.ABOUT, isOpen: false, isMinimized: false, zIndex: 1, position: { x: 200, y: 200 }, desktopId: 0 },
-  [AppId.SETTINGS]: { id: AppId.SETTINGS, isOpen: false, isMinimized: false, zIndex: 1, position: { x: 250, y: 250 }, desktopId: 0 },
+  [AppId.SETTINGS]: { id: AppId.CONTROL_PANEL, isOpen: false, isMinimized: false, zIndex: 1, position: { x: 250, y: 250 }, desktopId: 0 },
   [AppId.PICTURE_VIEWER]: { id: AppId.PICTURE_VIEWER, isOpen: false, isMinimized: false, zIndex: 1, position: { x: 300, y: 100 }, desktopId: 0 },
   [AppId.FILE_MANAGER]: { id: AppId.FILE_MANAGER, isOpen: false, isMinimized: false, zIndex: 1, position: { x: 120, y: 120 }, desktopId: 0 },
   [AppId.CONTROL_PANEL]: { id: AppId.CONTROL_PANEL, isOpen: false, isMinimized: false, zIndex: 1, position: { x: 180, y: 180 }, desktopId: 0 },
   [AppId.TEXT_EDITOR]: { id: AppId.TEXT_EDITOR, isOpen: false, isMinimized: false, zIndex: 1, position: { x: 220, y: 150 }, desktopId: 0 },
   [AppId.HELP]: { id: AppId.HELP, isOpen: false, isMinimized: false, zIndex: 1, position: { x: 80, y: 80 }, desktopId: 0 },
 };
+
+type IconSize = 'small' | 'medium' | 'large';
+type SortOption = 'name' | 'size' | 'date';
 
 const App: React.FC = () => {
   const [windows, setWindows] = useState<Record<AppId, WindowState>>(INITIAL_WINDOWS);
@@ -50,25 +54,34 @@ const App: React.FC = () => {
 
   // Desktop Files State
   const [desktopFiles, setDesktopFiles] = useState<FileSystemItem[]>([]);
+  
+  // Desktop Configuration State
+  const [iconSize, setIconSize] = useState<IconSize>('medium');
+  const [sortOption, setSortOption] = useState<SortOption>('name');
+  const [iconPositions, setIconPositions] = useState<Record<string, {x: number, y: number}>>({});
 
-  // --- Desktop Icons State ---
-  const [iconPositions, setIconPositions] = useState<Record<string, {x: number, y: number}>>(() => {
-    // Initialize icons in a grid/column
-    const pos: Record<string, {x: number, y: number}> = {};
-    INSTALLED_APPS.forEach((app, idx) => {
-      pos[app.id] = { x: 32, y: 32 + idx * 104 }; 
-    });
-    return pos;
-  });
+  // Context Menu State
+  const [desktopContextMenu, setDesktopContextMenu] = useState<{x: number, y: number} | null>(null);
+  const [iconContextMenu, setIconContextMenu] = useState<{x: number, y: number, item: any} | null>(null);
+  const [renamingItemId, setRenamingItemId] = useState<string | null>(null);
+  const [renameInput, setRenameInput] = useState('');
   
   // Drag Over state for Desktop Background Drop
   const [isDragOverDesktop, setIsDragOverDesktop] = useState(false);
+  const dragOffset = useRef({ x: 0, y: 0 });
 
   // --- Global System State ---
   const [settings, setSettings] = useState<SystemSettings>({
     wallpaper: 'https://static.rakko.cn/RakkoWorkplaceAssets/Pic/Wall.png',
     accentColor: 'indigo',
-    theme: (localStorage.getItem('theme') as 'dark'|'light') || 'dark'
+    theme: (localStorage.getItem('theme') as 'dark'|'light') || 'dark',
+    taskbar: {
+      alignment: 'left',
+      position: 'bottom',
+      showSearch: true,
+      showSeconds: false,
+      autoHide: false
+    }
   });
 
   const [currentUser, setCurrentUser] = useState<UserProfile>({
@@ -108,44 +121,78 @@ const App: React.FC = () => {
     return () => window.removeEventListener('fs-update', handleUpdate);
   }, []);
 
-  // Calculate Unified Desktop Items (Apps + Files)
-  const allDesktopItems = [
-    ...INSTALLED_APPS.map(app => ({ type: 'app', id: app.id, label: app.label, icon: app.icon })),
-    ...desktopFiles.map(file => ({ 
-        type: 'file', 
-        id: `file:${file.name}`, 
-        label: file.name, 
-        icon: file.type === 'folder' 
-            ? <Folder size={28} className="text-yellow-400" />
-            : file.fileType === 'image' 
-                ? <ImageIcon size={28} className="text-purple-400" />
-                : <FileText size={28} className="text-blue-400" />,
-        data: file
-    }))
-  ];
+  // --- Icon Grid Logic ---
 
-  // Assign Default Positions for new files
-  useEffect(() => {
-      setIconPositions(prev => {
-          const newPos = { ...prev };
-          let hasChanges = false;
-          let fileIndex = INSTALLED_APPS.length; // Start placing files after apps
-          
-          allDesktopItems.forEach((item, idx) => {
-              if (!newPos[item.id]) {
-                  // Simple grid placement logic
-                  const col = Math.floor(idx / 6);
-                  const row = idx % 6;
-                  newPos[item.id] = { 
-                      x: 32 + col * 100, 
-                      y: 32 + row * 104 
-                  };
-                  hasChanges = true;
-              }
-          });
-          return hasChanges ? newPos : prev;
+  // 1. Unified Desktop Items (Apps + Files)
+  const allDesktopItems = useMemo(() => {
+    const items = [
+      ...INSTALLED_APPS.map(app => ({ 
+          type: 'app' as const, 
+          id: app.id as string, 
+          label: app.label, 
+          icon: app.icon,
+          date: '0', // Apps always first or specific order
+          size: 0
+      })),
+      ...desktopFiles.map(file => ({ 
+          type: 'file' as const, 
+          id: `file:${file.name}`, 
+          label: file.name, 
+          icon: file.type === 'folder' 
+              ? <Folder size={28} className="text-yellow-400" />
+              : file.fileType === 'image' 
+                  ? <ImageIcon size={28} className="text-purple-400" />
+                  : <FileText size={28} className="text-blue-400" />,
+          data: file,
+          date: file.date,
+          size: parseInt(file.size || '0')
+      }))
+    ];
+
+    // Apply Sorting
+    return items.sort((a, b) => {
+        if (sortOption === 'name') return a.label.localeCompare(b.label);
+        if (sortOption === 'size') return (b.size || 0) - (a.size || 0);
+        if (sortOption === 'date') return (b.date || '').localeCompare(a.date || '');
+        return 0;
+    });
+
+  }, [desktopFiles, sortOption]);
+
+  // 2. Rearrange Logic (Snap to Grid)
+  const rearrangeIcons = () => {
+      // Grid configuration based on size
+      let gridSize = 104; // Default medium
+      let startX = 24;
+      let startY = 24;
+      let gap = 16;
+      
+      if (iconSize === 'small') { gridSize = 88; startX = 16; startY = 16; }
+      if (iconSize === 'large') { gridSize = 136; startX = 32; startY = 32; }
+
+      // Get container height (approximate or window height)
+      const maxHeight = window.innerHeight - 60; // Minus taskbar
+      const itemsPerColumn = Math.floor((maxHeight - startY) / gridSize);
+
+      const newPos: Record<string, {x: number, y: number}> = {};
+
+      allDesktopItems.forEach((item, index) => {
+          const col = Math.floor(index / itemsPerColumn);
+          const row = index % itemsPerColumn;
+
+          newPos[item.id] = {
+              x: startX + col * (gridSize + gap/2),
+              y: startY + row * gridSize
+          };
       });
-  }, [allDesktopItems.length]);
+
+      setIconPositions(newPos);
+  };
+
+  // Trigger rearrangement when sort, size, or items change
+  useEffect(() => {
+      rearrangeIcons();
+  }, [allDesktopItems, iconSize]);
 
 
   const toggleTheme = () => {
@@ -214,30 +261,90 @@ const App: React.FC = () => {
     const w = windows[id];
     
     if (!w.isOpen) {
-        // Case 1: Open it
         openApp(id);
     } else if (w.isMinimized) {
-        // Case 2: Restore
         setWindows(prev => ({ ...prev, [id]: { ...prev[id], isMinimized: false, desktopId: currentDesktop } }));
         bringToFront(id);
     } else if (w.desktopId !== currentDesktop) {
-        // Case 3: Open on another desktop -> Move here (or switch desktop? Moving is easier for now)
         setWindows(prev => ({ ...prev, [id]: { ...prev[id], desktopId: currentDesktop } }));
         bringToFront(id);
     } else if (activeApp === id) {
-        // Case 4: Is Active -> Minimize
         minimizeApp(id);
     } else {
-        // Case 5: Background -> Foreground
         bringToFront(id);
     }
   };
+
+  // --- Context Menu Handlers ---
+  const handleDesktopContextMenu = (e: React.MouseEvent) => {
+      e.preventDefault();
+      // Ensure we aren't clicking on an icon (bubbling is stopped there usually, but safety check)
+      if ((e.target as HTMLElement).closest('.desktop-icon')) return;
+      
+      setDesktopContextMenu({ x: e.clientX, y: e.clientY });
+      setIconContextMenu(null);
+  };
+  
+  const handleIconContextMenu = (e: React.MouseEvent, item: any) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setIconContextMenu({ x: e.clientX, y: e.clientY, item });
+      setDesktopContextMenu(null);
+  };
+
+  const handleCreateNew = (type: 'folder' | 'text') => {
+      const basePath = '/C/Desktop';
+      try {
+          if (type === 'folder') {
+              fsService.createFile(basePath, 'New Folder', 'folder');
+          } else {
+              fsService.createFile(basePath, 'New Text Document.txt', 'file', '');
+          }
+      } catch (e) {
+          console.error(e);
+      }
+      setDesktopContextMenu(null);
+  };
+  
+  const handleDeleteIcon = (item: any) => {
+      if (item.type === 'file') {
+          if (confirm(`Are you sure you want to delete "${item.label}"?`)) {
+              fsService.deleteFile('/C/Desktop', item.data.name);
+          }
+      }
+      setIconContextMenu(null);
+  };
+  
+  const handleRenameIcon = (item: any) => {
+      if (item.type === 'file') {
+          setRenamingItemId(item.id);
+          setRenameInput(item.label);
+      }
+      setIconContextMenu(null);
+  };
+  
+  const submitRename = () => {
+      if (!renamingItemId || !renameInput.trim()) {
+          setRenamingItemId(null);
+          return;
+      }
+      
+      const item = allDesktopItems.find(i => i.id === renamingItemId);
+      if (item && item.type === 'file') {
+          try {
+              fsService.renameFile('/C/Desktop', item.data.name, renameInput);
+          } catch (e: any) {
+              alert(e.message);
+          }
+      }
+      setRenamingItemId(null);
+  }
 
   // --- Desktop Drop Logic (Handles Uploads & Moves) ---
   const handleDragOverDesktop = (e: React.DragEvent) => {
       e.preventDefault();
       // Only highlight if valid types
-      if (e.dataTransfer.types.includes('Files') || e.dataTransfer.types.includes('application/rakko-item')) {
+      if (e.dataTransfer.types.includes('Files') || e.dataTransfer.types.includes('application/rakko-item') || e.dataTransfer.types.includes('application/rakko-icon-move')) {
           setIsDragOverDesktop(true);
       }
   };
@@ -250,21 +357,28 @@ const App: React.FC = () => {
       e.preventDefault();
       setIsDragOverDesktop(false);
 
-      // 1. Internal Item Move
+      // A. Icon Repositioning (Internal Move within Desktop)
+      const moveId = e.dataTransfer.getData('application/rakko-icon-move');
+      if (moveId) {
+          const newX = e.clientX - dragOffset.current.x;
+          const newY = e.clientY - dragOffset.current.y;
+          
+          setIconPositions(prev => ({
+              ...prev,
+              [moveId]: { x: newX, y: newY }
+          }));
+          return;
+      }
+
+      // B. File System Item Move (From File Manager to Desktop)
       const rakkoData = e.dataTransfer.getData('application/rakko-item');
       if (rakkoData) {
           try {
               const { name, path: sourcePath, type } = JSON.parse(rakkoData);
               if (type === 'rakko-file') {
                 if (sourcePath === '/C/Desktop') {
-                   // Rearrange on Desktop - Update Icon Position
-                   // We use e.clientX/Y to update position
-                   // Note: 'name' here corresponds to file name, need to find ID
-                   const id = `file:${name}`;
-                   setIconPositions(prev => ({
-                       ...prev,
-                       [id]: { x: e.clientX - 32, y: e.clientY - 32 } // Center on mouse roughly
-                   }));
+                   // This case should be covered by icon-move generally, but fall back if needed
+                   // However, for consistency, dragStart sets both if needed
                 } else {
                    // Move from Folder to Desktop
                    fsService.moveFile(sourcePath, '/C/Desktop', name);
@@ -274,7 +388,7 @@ const App: React.FC = () => {
           return;
       }
 
-      // 2. External File Upload
+      // C. External File Upload (Drag from OS to Desktop)
       if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
           const files = Array.from(e.dataTransfer.files) as File[];
           const uploadPath = '/C/Desktop'; 
@@ -301,6 +415,14 @@ const App: React.FC = () => {
   };
 
   const handleIconDragStart = (e: React.DragEvent, item: any) => {
+      // 1. Calculate offset to keep cursor relative to icon
+      const rect = (e.target as HTMLElement).getBoundingClientRect();
+      dragOffset.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+
+      // 2. Set generic move ID for visual repositioning
+      e.dataTransfer.setData('application/rakko-icon-move', item.id);
+      
+      // 3. If file, also set FS data for moving to folders
       if (item.type === 'file') {
           const dragData = JSON.stringify({
              name: item.data.name,
@@ -308,9 +430,22 @@ const App: React.FC = () => {
              type: 'rakko-file'
           });
           e.dataTransfer.setData('application/rakko-item', dragData);
-          e.dataTransfer.effectAllowed = 'move';
-      } else {
-         e.preventDefault(); // Apps aren't draggable to file system currently
+      }
+      
+      e.dataTransfer.effectAllowed = 'move';
+  };
+  
+  const handleOpenItem = (item: any) => {
+      if (item.type === 'app') openApp(item.id as AppId);
+      else if (item.type === 'file') {
+         const f = item.data;
+         if (f.fileType === 'image' && f.url) {
+            openApp(AppId.PICTURE_VIEWER, { url: f.url, title: f.name });
+         } else if (f.fileType === 'text') {
+            openApp(AppId.TEXT_EDITOR, { initialPath: '/C/Desktop', initialFileName: f.name });
+         } else if (f.type === 'folder') {
+            openApp(AppId.FILE_MANAGER); 
+         }
       }
   };
 
@@ -358,7 +493,7 @@ const App: React.FC = () => {
   return (
     <div className="relative w-screen h-screen overflow-hidden select-none font-sans bg-black">
       
-      {/* Desktop Background Layer (Drop Zone) */}
+      {/* Desktop Background Layer (Drop Zone & Context Menu Trigger) */}
       <div 
         className="absolute inset-0 z-0 bg-cover bg-center transition-all duration-700 ease-in-out"
         style={{ 
@@ -367,6 +502,7 @@ const App: React.FC = () => {
         onDragOver={handleDragOverDesktop}
         onDragLeave={handleDragLeaveDesktop}
         onDrop={handleDropOnDesktop}
+        onContextMenu={handleDesktopContextMenu}
       >
           <div className="absolute inset-0 bg-glass-bg/20 pointer-events-none" />
           
@@ -379,37 +515,174 @@ const App: React.FC = () => {
           {allDesktopItems.map(item => (
               <div
                   key={item.id}
+                  className="desktop-icon absolute z-10"
                   style={{
-                      position: 'absolute',
-                      left: iconPositions[item.id]?.x || 32,
-                      top: iconPositions[item.id]?.y || 32,
-                      touchAction: 'none'
+                      left: iconPositions[item.id]?.x || 0,
+                      top: iconPositions[item.id]?.y || 0,
+                      touchAction: 'none',
                   }}
-                  draggable={item.type === 'file'}
+                  draggable
                   onDragStart={(e) => handleIconDragStart(e, item)}
+                  onContextMenu={(e) => handleIconContextMenu(e, item)}
               >
-                  <DesktopIcon 
-                      label={item.label} 
-                      icon={item.icon} 
-                      onClick={() => {
-                          if (item.type === 'app') openApp(item.id as AppId);
-                          else if (item.type === 'file') {
-                             const f = item.data;
-                             if (f.fileType === 'image' && f.url) {
-                                openApp(AppId.PICTURE_VIEWER, { url: f.url, title: f.name });
-                             } else if (f.fileType === 'text') {
-                                openApp(AppId.TEXT_EDITOR, { initialPath: '/C/Desktop', initialFileName: f.name });
-                             } else if (f.type === 'folder') {
-                                // TODO: Open folder in FM (Navigate to /C/Desktop/Folder)
-                                openApp(AppId.FILE_MANAGER); 
-                             }
-                          }
-                      }} 
-                      accentColor={settings.accentColor}
-                  />
+                  {renamingItemId === item.id ? (
+                      <div className="w-24 flex flex-col items-center gap-1.5 p-2 bg-black/40 rounded-lg">
+                          <div className="w-14 h-14 flex items-center justify-center">
+                              {item.icon}
+                          </div>
+                          <input 
+                            autoFocus
+                            value={renameInput}
+                            onChange={(e) => setRenameInput(e.target.value)}
+                            onBlur={submitRename}
+                            onKeyDown={(e) => e.key === 'Enter' && submitRename()}
+                            className="w-full text-xs text-center bg-white text-black rounded px-1 outline-none border border-indigo-500"
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                      </div>
+                  ) : (
+                      <DesktopIcon 
+                          label={item.label} 
+                          icon={item.icon} 
+                          size={iconSize}
+                          onClick={() => handleOpenItem(item)} 
+                          accentColor={settings.accentColor}
+                      />
+                  )}
               </div>
           ))}
       </div>
+
+      {/* Desktop Context Menu Portal */}
+      {desktopContextMenu && createPortal(
+          <>
+            {/* Backdrop to close menu on click outside */}
+            <div 
+                className="fixed inset-0 z-[9998]" 
+                onClick={() => setDesktopContextMenu(null)}
+                onContextMenu={(e) => { e.preventDefault(); setDesktopContextMenu(null); }}
+            />
+            <div 
+                className="fixed z-[9999] min-w-[200px] bg-glass-panel backdrop-blur-xl border border-glass-border rounded-lg shadow-[0_10px_40px_rgba(0,0,0,0.5)] py-1.5 animate-pop flex flex-col text-sm text-glass-text origin-top-left"
+                style={{ 
+                    top: Math.min(desktopContextMenu.y, window.innerHeight - 320), 
+                    left: Math.min(desktopContextMenu.x, window.innerWidth - 220) 
+                }}
+                onClick={(e) => e.stopPropagation()}
+                onContextMenu={(e) => e.preventDefault()}
+            >
+                {/* View Submenu Group */}
+                <div className="group/item relative px-1">
+                    <button className="w-full text-left px-3 py-2 hover:bg-indigo-600/80 hover:text-white rounded flex items-center justify-between">
+                        <div className="flex items-center gap-2"><Monitor size={14} className="opacity-70"/> View</div>
+                        <span className="text-[10px]">▶</span>
+                    </button>
+                    {/* Nested Menu */}
+                    <div className="absolute left-full top-0 ml-1 w-40 bg-glass-panel backdrop-blur-xl border border-glass-border rounded-lg shadow-xl py-1 hidden group-hover/item:block animate-fade-in">
+                        <button onClick={() => { setIconSize('large'); setDesktopContextMenu(null); }} className="w-full text-left px-3 py-2 hover:bg-indigo-600/80 hover:text-white flex items-center gap-2">
+                            <div className="w-4 flex justify-center">{iconSize === 'large' && <Check size={12}/>}</div> Large Icons
+                        </button>
+                        <button onClick={() => { setIconSize('medium'); setDesktopContextMenu(null); }} className="w-full text-left px-3 py-2 hover:bg-indigo-600/80 hover:text-white flex items-center gap-2">
+                            <div className="w-4 flex justify-center">{iconSize === 'medium' && <Check size={12}/>}</div> Medium Icons
+                        </button>
+                        <button onClick={() => { setIconSize('small'); setDesktopContextMenu(null); }} className="w-full text-left px-3 py-2 hover:bg-indigo-600/80 hover:text-white flex items-center gap-2">
+                            <div className="w-4 flex justify-center">{iconSize === 'small' && <Check size={12}/>}</div> Small Icons
+                        </button>
+                    </div>
+                </div>
+
+                {/* Sort Submenu Group */}
+                <div className="group/item relative px-1">
+                    <button className="w-full text-left px-3 py-2 hover:bg-indigo-600/80 hover:text-white rounded flex items-center justify-between">
+                        <div className="flex items-center gap-2"><Grid size={14} className="opacity-70"/> Sort by</div>
+                        <span className="text-[10px]">▶</span>
+                    </button>
+                    <div className="absolute left-full top-0 ml-1 w-40 bg-glass-panel backdrop-blur-xl border border-glass-border rounded-lg shadow-xl py-1 hidden group-hover/item:block animate-fade-in">
+                        <button onClick={() => { setSortOption('name'); setDesktopContextMenu(null); }} className="w-full text-left px-3 py-2 hover:bg-indigo-600/80 hover:text-white flex items-center gap-2">
+                            <div className="w-4 flex justify-center">{sortOption === 'name' && <Check size={12}/>}</div> Name
+                        </button>
+                        <button onClick={() => { setSortOption('size'); setDesktopContextMenu(null); }} className="w-full text-left px-3 py-2 hover:bg-indigo-600/80 hover:text-white flex items-center gap-2">
+                            <div className="w-4 flex justify-center">{sortOption === 'size' && <Check size={12}/>}</div> Size
+                        </button>
+                        <button onClick={() => { setSortOption('date'); setDesktopContextMenu(null); }} className="w-full text-left px-3 py-2 hover:bg-indigo-600/80 hover:text-white flex items-center gap-2">
+                            <div className="w-4 flex justify-center">{sortOption === 'date' && <Check size={12}/>}</div> Date
+                        </button>
+                    </div>
+                </div>
+
+                <div className="h-px bg-white/10 my-1 mx-2" />
+
+                <button onClick={() => { loadDesktopFiles(); setDesktopContextMenu(null); }} className="text-left px-4 py-2 hover:bg-indigo-600/80 hover:text-white flex items-center gap-3 transition-colors mx-1 rounded">
+                    <RefreshCw size={14} className="opacity-70"/> Refresh
+                </button>
+
+                <div className="h-px bg-white/10 my-1 mx-2" />
+                
+                <div className="group/item relative px-1">
+                    <button className="w-full text-left px-3 py-2 hover:bg-indigo-600/80 hover:text-white rounded flex items-center justify-between">
+                        <div className="flex items-center gap-2"><Plus size={14} className="opacity-70"/> New</div>
+                        <span className="text-[10px]">▶</span>
+                    </button>
+                    <div className="absolute left-full top-0 ml-1 w-48 bg-glass-panel backdrop-blur-xl border border-glass-border rounded-lg shadow-xl py-1 hidden group-hover/item:block animate-fade-in">
+                        <button onClick={() => handleCreateNew('folder')} className="w-full text-left px-3 py-2 hover:bg-indigo-600/80 hover:text-white flex items-center gap-2">
+                            <Folder size={14} className="text-yellow-400"/> Folder
+                        </button>
+                        <button onClick={() => handleCreateNew('text')} className="w-full text-left px-3 py-2 hover:bg-indigo-600/80 hover:text-white flex items-center gap-2">
+                            <FileText size={14} className="text-blue-400"/> Text Document
+                        </button>
+                    </div>
+                </div>
+
+                <div className="h-px bg-white/10 my-1 mx-2" />
+
+                <button onClick={() => { openApp(AppId.CONTROL_PANEL); setDesktopContextMenu(null); }} className="text-left px-4 py-2 hover:bg-indigo-600/80 hover:text-white flex items-center gap-3 transition-colors mx-1 rounded">
+                    <Settings size={14} className="opacity-70"/> Personalize
+                </button>
+            </div>
+          </>,
+          document.body
+      )}
+
+      {/* Icon Context Menu Portal */}
+      {iconContextMenu && createPortal(
+          <>
+             <div 
+                className="fixed inset-0 z-[9998]" 
+                onClick={() => setIconContextMenu(null)}
+                onContextMenu={(e) => { e.preventDefault(); setIconContextMenu(null); }}
+             />
+             <div 
+                className="fixed z-[9999] min-w-[180px] bg-glass-panel backdrop-blur-xl border border-glass-border rounded-lg shadow-2xl py-1.5 animate-pop flex flex-col text-sm text-glass-text"
+                style={{ 
+                    top: Math.min(iconContextMenu.y, window.innerHeight - 200), 
+                    left: Math.min(iconContextMenu.x, window.innerWidth - 180) 
+                }}
+                onClick={(e) => e.stopPropagation()}
+                onContextMenu={(e) => e.preventDefault()}
+             >
+                <div className="px-4 py-1.5 mb-1 text-xs text-glass-textMuted font-bold uppercase tracking-wider border-b border-glass-border">
+                    {iconContextMenu.item.label}
+                </div>
+                
+                <button onClick={() => { handleOpenItem(iconContextMenu.item); setIconContextMenu(null); }} className="text-left px-4 py-2 hover:bg-indigo-600/80 hover:text-white flex items-center gap-3 transition-colors mx-1 rounded font-bold">
+                    <Maximize2 size={14} className="opacity-70"/> Open
+                </button>
+                
+                {iconContextMenu.item.type === 'file' && (
+                    <>
+                        <div className="h-px bg-white/10 my-1 mx-2" />
+                        <button onClick={() => handleRenameIcon(iconContextMenu.item)} className="text-left px-4 py-2 hover:bg-indigo-600/80 hover:text-white flex items-center gap-3 transition-colors mx-1 rounded">
+                            <Edit3 size={14} className="opacity-70"/> Rename
+                        </button>
+                        <button onClick={() => handleDeleteIcon(iconContextMenu.item)} className="text-left px-4 py-2 hover:bg-red-600/80 hover:text-white flex items-center gap-3 transition-colors mx-1 rounded text-red-300">
+                            <Trash2 size={14} className="opacity-70"/> Delete
+                        </button>
+                    </>
+                )}
+             </div>
+          </>,
+          document.body
+      )}
 
       {/* Windows Layer (z-1+) */}
       {(Object.values(windows) as WindowState[]).map(windowState => {
@@ -445,6 +718,7 @@ const App: React.FC = () => {
             window.location.reload();
         }}
         onClose={() => setIsStartMenuOpen(false)}
+        position={settings.taskbar.position}
       />
 
       {/* Task View Overlay */}
@@ -490,18 +764,30 @@ const App: React.FC = () => {
 };
 
 // Desktop Icon Helper
-const DesktopIcon: React.FC<{ label: string; icon: React.ReactNode; onClick: () => void; accentColor: string }> = ({ label, icon, onClick, accentColor }) => (
-  <button 
-    onClick={onClick}
-    className="group flex flex-col items-center gap-2 w-24 p-2 rounded-lg hover:bg-white/10 transition-colors focus:outline-none focus:bg-white/20 cursor-default"
-  >
-    <div className={`w-14 h-14 rounded-xl bg-glass-panel flex items-center justify-center shadow-lg border border-glass-border group-hover:scale-105 transition-transform duration-200 text-${accentColor}-400 group-hover:text-${accentColor}-300 cursor-pointer`}>
-      {React.isValidElement(icon) ? React.cloneElement(icon as React.ReactElement<any>, { size: 28 }) : icon}
-    </div>
-    <span className="text-white text-xs font-medium text-shadow-sm bg-black/40 px-2 py-0.5 rounded-full backdrop-blur-sm border border-transparent group-hover:border-white/10 cursor-pointer break-all text-center leading-tight">
-      {label}
-    </span>
-  </button>
-);
+const DesktopIcon: React.FC<{ label: string; icon: React.ReactNode; onClick: () => void; accentColor: string; size: IconSize }> = ({ label, icon, onClick, accentColor, size }) => {
+    
+    // Size Configuration
+    const sizeConfig = {
+        small: { width: 'w-[72px]', iconBox: 'w-10 h-10', iconSize: 20, text: 'text-[10px] line-clamp-2' },
+        medium: { width: 'w-24', iconBox: 'w-14 h-14', iconSize: 28, text: 'text-xs' },
+        large: { width: 'w-32', iconBox: 'w-20 h-20', iconSize: 40, text: 'text-sm' },
+    };
+    
+    const cfg = sizeConfig[size];
+
+    return (
+        <button 
+            onClick={onClick}
+            className={`group flex flex-col items-center gap-1.5 ${cfg.width} p-2 rounded-lg hover:bg-white/10 transition-all focus:outline-none focus:bg-white/20 cursor-default`}
+        >
+            <div className={`${cfg.iconBox} rounded-xl bg-glass-panel flex items-center justify-center shadow-lg border border-glass-border group-hover:scale-105 transition-transform duration-200 text-${accentColor}-400 group-hover:text-${accentColor}-300 cursor-pointer pointer-events-none`}>
+            {React.isValidElement(icon) ? React.cloneElement(icon as React.ReactElement<any>, { size: cfg.iconSize }) : icon}
+            </div>
+            <span className={`text-white font-medium text-shadow-sm bg-black/40 px-2 py-0.5 rounded-full backdrop-blur-sm border border-transparent group-hover:border-white/10 cursor-pointer break-all text-center leading-tight ${cfg.text}`}>
+            {label}
+            </span>
+        </button>
+    );
+};
 
 export default App;

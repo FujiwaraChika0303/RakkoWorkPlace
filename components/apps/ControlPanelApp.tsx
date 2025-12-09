@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Monitor, User, Layers, Shield, Check, Laptop, Sun, Moon } from 'lucide-react';
+import { Monitor, User, Layers, Shield, Check, Laptop, Sun, Moon, LayoutTemplate } from 'lucide-react';
 import { SystemSettings, UserProfile } from '../../types';
 import { fsService } from '../../services/fileSystemService';
 
@@ -10,7 +10,7 @@ interface ControlPanelProps {
   onUpdateUser: (newUser: UserProfile) => void;
 }
 
-type TabId = 'display' | 'personalization' | 'accounts' | 'system';
+type TabId = 'display' | 'personalization' | 'taskbar' | 'accounts' | 'system';
 
 export const ControlPanelApp: React.FC<ControlPanelProps> = ({ 
   settings, 
@@ -37,6 +37,15 @@ export const ControlPanelApp: React.FC<ControlPanelProps> = ({
     { name: 'Guest User', role: 'Visitor', avatarColor: 'bg-gray-500' },
     { name: 'Developer', role: 'System', avatarColor: 'bg-emerald-600' },
   ];
+  
+  const updateTaskbar = (key: keyof SystemSettings['taskbar'], value: any) => {
+      onUpdateSettings({
+          taskbar: {
+              ...settings.taskbar,
+              [key]: value
+          }
+      });
+  };
 
   const renderContent = () => {
     switch (activeTab) {
@@ -129,6 +138,74 @@ export const ControlPanelApp: React.FC<ControlPanelProps> = ({
             </div>
           </div>
         );
+      
+      case 'taskbar':
+          return (
+              <div className="space-y-8 animate-fade-in">
+                  <div>
+                      <h3 className="text-lg font-medium text-glass-text mb-4 flex items-center gap-2"><LayoutTemplate size={20}/> Taskbar Behaviors</h3>
+                      
+                      <div className="space-y-4">
+                          {/* Alignment */}
+                          <div className="flex items-center justify-between p-3 bg-glass-bg/10 rounded-lg border border-glass-border">
+                              <div>
+                                  <div className="font-medium">Taskbar Alignment</div>
+                                  <div className="text-xs text-glass-textMuted">Choose how apps are aligned on the taskbar.</div>
+                              </div>
+                              <div className="flex bg-black/20 rounded p-1 border border-white/5">
+                                  <button 
+                                    onClick={() => updateTaskbar('alignment', 'left')}
+                                    className={`px-3 py-1 text-xs rounded transition-all ${settings.taskbar.alignment === 'left' ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-white'}`}
+                                  >Left</button>
+                                  <button 
+                                    onClick={() => updateTaskbar('alignment', 'center')}
+                                    className={`px-3 py-1 text-xs rounded transition-all ${settings.taskbar.alignment === 'center' ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-white'}`}
+                                  >Center</button>
+                              </div>
+                          </div>
+
+                          {/* Position */}
+                          <div className="flex items-center justify-between p-3 bg-glass-bg/10 rounded-lg border border-glass-border">
+                              <div>
+                                  <div className="font-medium">Taskbar Position</div>
+                                  <div className="text-xs text-glass-textMuted">Move the taskbar to the top or bottom of the screen.</div>
+                              </div>
+                              <div className="flex bg-black/20 rounded p-1 border border-white/5">
+                                  <button 
+                                    onClick={() => updateTaskbar('position', 'top')}
+                                    className={`px-3 py-1 text-xs rounded transition-all ${settings.taskbar.position === 'top' ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-white'}`}
+                                  >Top</button>
+                                  <button 
+                                    onClick={() => updateTaskbar('position', 'bottom')}
+                                    className={`px-3 py-1 text-xs rounded transition-all ${settings.taskbar.position === 'bottom' ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-white'}`}
+                                  >Bottom</button>
+                              </div>
+                          </div>
+                      </div>
+                  </div>
+
+                  <div>
+                      <h3 className="text-lg font-medium text-glass-text mb-4">Toggles</h3>
+                      <div className="space-y-2">
+                          <ToggleItem 
+                            label="Automatically hide the taskbar" 
+                            checked={settings.taskbar.autoHide} 
+                            onChange={(v) => updateTaskbar('autoHide', v)} 
+                          />
+                          <ToggleItem 
+                            label="Show search button" 
+                            checked={settings.taskbar.showSearch} 
+                            onChange={(v) => updateTaskbar('showSearch', v)} 
+                          />
+                          <ToggleItem 
+                            label="Show seconds in system clock" 
+                            checked={settings.taskbar.showSeconds} 
+                            onChange={(v) => updateTaskbar('showSeconds', v)} 
+                          />
+                      </div>
+                  </div>
+              </div>
+          );
 
       case 'accounts':
         return (
@@ -220,6 +297,9 @@ export const ControlPanelApp: React.FC<ControlPanelProps> = ({
           <button onClick={() => setActiveTab('personalization')} className={navItemClass('personalization')}>
             <Layers size={18} /> Personalization
           </button>
+          <button onClick={() => setActiveTab('taskbar')} className={navItemClass('taskbar')}>
+            <LayoutTemplate size={18} /> Taskbar
+          </button>
           <button onClick={() => setActiveTab('accounts')} className={navItemClass('accounts')}>
             <User size={18} /> Accounts
           </button>
@@ -241,3 +321,15 @@ export const ControlPanelApp: React.FC<ControlPanelProps> = ({
     </div>
   );
 };
+
+const ToggleItem = ({ label, checked, onChange }: { label: string, checked: boolean, onChange: (v: boolean) => void }) => (
+    <div 
+        className="flex items-center justify-between p-3 bg-glass-bg/10 rounded-lg border border-glass-border cursor-pointer hover:bg-glass-bg/20 transition-colors"
+        onClick={() => onChange(!checked)}
+    >
+        <span className="text-sm font-medium">{label}</span>
+        <div className={`w-10 h-5 rounded-full relative transition-colors ${checked ? 'bg-indigo-600' : 'bg-gray-600'}`}>
+            <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-transform ${checked ? 'left-6' : 'left-1'}`} />
+        </div>
+    </div>
+);

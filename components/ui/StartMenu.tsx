@@ -15,10 +15,15 @@ interface StartMenuProps {
   onOpenApp: (id: AppId) => void;
   onShutdown: () => void;
   onClose: () => void;
+  position?: 'top' | 'bottom';
 }
 
-export const StartMenu: React.FC<StartMenuProps> = ({ isOpen, user, apps, onOpenApp, onShutdown, onClose }) => {
+export const StartMenu: React.FC<StartMenuProps> = ({ isOpen, user, apps, onOpenApp, onShutdown, onClose, position = 'bottom' }) => {
   if (!isOpen) return null;
+
+  const positionClass = position === 'top' 
+    ? 'top-14 origin-top-left' 
+    : 'bottom-14 origin-bottom-left';
 
   return (
     <>
@@ -26,7 +31,7 @@ export const StartMenu: React.FC<StartMenuProps> = ({ isOpen, user, apps, onOpen
       <div className="fixed inset-0 z-[60]" onClick={onClose} />
       
       {/* Menu */}
-      <div className="fixed bottom-14 left-4 width-80 w-80 bg-glass-dark backdrop-blur-2xl border border-white/10 rounded-xl shadow-2xl z-[70] overflow-hidden flex flex-col animate-fade-in origin-bottom-left">
+      <div className={`fixed left-4 width-80 w-80 bg-glass-dark backdrop-blur-2xl border border-white/10 rounded-xl shadow-2xl z-[70] overflow-hidden flex flex-col animate-fade-in ${positionClass}`}>
         {/* User Profile Header */}
         <div className="p-6 bg-gradient-to-r from-gray-900 to-black border-b border-white/10 flex items-center gap-4">
           <div className={`w-12 h-12 rounded-full flex items-center justify-center text-white border-2 border-white/20 font-bold shadow-lg ${user.avatarColor}`}>

@@ -45,10 +45,19 @@ export interface UserProfile {
   avatarColor: string;
 }
 
+export interface TaskbarSettings {
+  alignment: 'left' | 'center';
+  position: 'bottom' | 'top';
+  showSearch: boolean;
+  showSeconds: boolean;
+  autoHide: boolean;
+}
+
 export interface SystemSettings {
   wallpaper: string;
   accentColor: string;
   theme: 'dark' | 'light';
+  taskbar: TaskbarSettings;
 }
 
 export interface FileSystemItem {
