@@ -66,19 +66,53 @@ export const Taskbar: React.FC<TaskbarProps> = ({
     : 'translateY(0)';
 
   const displayedApps = useMemo(() => {
+      // 1. Get Pinned Apps
       const pinned = pinnedAppIds
           .map(id => installedApps.find(app => app.id === id))
           .filter(Boolean) as typeof installedApps;
       
-      const runningUnpinned = (Object.values(openWindows) as WindowState[])
-          .filter((win) => win.isOpen && !pinnedAppIds.includes(win.id))
-          .map((win) => installedApps.find(app => app.id === win.id))
+      // 2. Get Running Apps (Grouped)
+      // Special logic for Browser: Group all browser-* windows under generic BROWSER id
+      const runningIds = new Set<string>();
+      (Object.values(openWindows) as WindowState[]).forEach(win => {
+          if (win.isOpen) {
+             if (win.id.startsWith(AppId.BROWSER)) {
+                 runningIds.add(AppId.BROWSER);
+             } else {
+                 runningIds.add(win.id);
+             }
+          }
+      });
+
+      // Filter out running apps that are already pinned
+      const runningUnpinned = Array.from(runningIds)
+          .filter(id => !pinnedAppIds.includes(id))
+          .map(id => installedApps.find(app => app.id === id))
           .filter(Boolean) as typeof installedApps;
 
       return [...pinned, ...runningUnpinned];
   }, [pinnedAppIds, openWindows, installedApps]);
 
   const getAppStatus = (id: AppId) => {
+    // Special grouping logic for Browser
+    if (id === AppId.BROWSER) {
+        const browserWindows = Object.values(openWindows).filter(w => w.id.startsWith(AppId.BROWSER) && w.isOpen);
+        const isOpen = browserWindows.length > 0;
+        const isActive = browserWindows.some(w => activeApp === w.id);
+        const isOnCurrentDesktop = browserWindows.some(w => w.desktopId === currentDesktop);
+        
+        // Use first window for preview if available, or just nothing for now
+        const previewUrl = browserWindows[0]?.previewUrl;
+        
+        return {
+            isOpen,
+            isActive,
+            isOnCurrentDesktop,
+            title: 'Rakko Browser',
+            previewUrl
+        };
+    }
+
     const win = openWindows[id];
     return {
       isOpen: win?.isOpen,
@@ -92,9 +126,9 @@ export const Taskbar: React.FC<TaskbarProps> = ({
   const handleMouseEnterApp = (e: React.MouseEvent, appId: AppId) => {
       const target = e.currentTarget as HTMLElement;
       const rect = target.getBoundingClientRect();
-      const win = openWindows[appId];
+      const status = getAppStatus(appId);
       
-      if (win?.isOpen) {
+      if (status.isOpen) {
           if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
           hoverTimeoutRef.current = window.setTimeout(() => {
               setHoveredApp({ id: appId, rect });
@@ -260,7 +294,12 @@ export const Taskbar: React.FC<TaskbarProps> = ({
                             />
                         ) : (
                             <div className="w-[400%] h-[400%] origin-top-left scale-[0.25] pointer-events-none select-none p-4 opacity-100 absolute top-0 left-0">
-                                {renderWindowContent(hoveredApp.id)}
+                                {
+                                    // Special handle for grouped browser - show generic or active
+                                    hoveredApp.id === AppId.BROWSER 
+                                    ? <div className="text-gray-500 flex items-center justify-center h-full">Grouped Windows</div>
+                                    : renderWindowContent(hoveredApp.id)
+                                }
                             </div>
                         )}
                   </div>

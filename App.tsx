@@ -1,6 +1,7 @@
+
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { MessageSquare, Image as ImageIcon, Info, Hexagon, Settings, Folder, FileText, Sun, Moon, HelpCircle, Monitor, Grid, Type, Calendar, HardDrive, Plus, RefreshCw, Check, Trash2, X, Maximize2, Edit3, ExternalLink, Pin, PinOff, Activity, LayoutTemplate, Box } from 'lucide-react';
+import { MessageSquare, Image as ImageIcon, Info, Hexagon, Settings, Folder, FileText, Sun, Moon, HelpCircle, Monitor, Grid, Type, Calendar, HardDrive, Plus, RefreshCw, Check, Trash2, X, Maximize2, Edit3, ExternalLink, Pin, PinOff, Activity, LayoutTemplate, Box, Globe } from 'lucide-react';
 import { Window } from './components/ui/Window';
 import { StartMenu } from './components/ui/StartMenu';
 import { Taskbar } from './components/ui/Taskbar';
@@ -16,13 +17,15 @@ import { TextEditorApp } from './components/apps/TextEditorApp';
 import { HelpApp } from './components/apps/HelpApp';
 import { TaskManagerApp } from './components/apps/TaskManagerApp';
 import { IframeApp } from './components/apps/IframeApp';
+import { BrowserApp } from './components/apps/BrowserApp';
 import { fsService } from './services/fileSystemService';
 import { processRegistry } from './services/processRegistry';
 import { useSystemProcess } from './hooks/useSystemProcess';
-import { loadThirdPartyApps, ThirdPartyAppDefinition } from './services/thirdPartyAppsService';
+import { scanThirdPartyApps, ThirdPartyAppDefinition } from './services/thirdPartyAppsService';
 
 // --- SYSTEM APP REGISTRY ---
 const SYSTEM_APPS = [
+  { id: AppId.BROWSER, label: 'Rakko Browser', icon: <Globe size={20} className="text-sky-400" /> },
   { id: AppId.PICTURE_VIEWER, label: 'Picture Studio', icon: <ImageIcon size={20} className="text-pink-400" /> },
   { id: AppId.HELP, label: 'Help Center', icon: <HelpCircle size={20} className="text-orange-400" /> },
   { id: AppId.FILE_MANAGER, label: 'File Manager', icon: <Folder size={20} className="text-yellow-400" /> },
@@ -86,7 +89,7 @@ const App: React.FC = () => {
     if (saved) {
         try { return JSON.parse(saved); } catch { return []; }
     }
-    return [AppId.FILE_MANAGER, AppId.TEXT_EDITOR, AppId.PICTURE_VIEWER];
+    return [AppId.BROWSER, AppId.FILE_MANAGER, AppId.TEXT_EDITOR];
   });
 
   // Context Menu State (Unified)
@@ -126,7 +129,7 @@ const App: React.FC = () => {
 
   // Load Third Party Apps on mount
   useEffect(() => {
-    const loadedApps = loadThirdPartyApps();
+    const loadedApps = scanThirdPartyApps();
     setThirdPartyApps(loadedApps);
   }, []);
 
@@ -137,9 +140,14 @@ const App: React.FC = () => {
       id: app.id,
       label: app.label,
       icon: app.iconUrl ? (
-        <img src={app.iconUrl} className="w-full h-full object-contain pointer-events-none" alt={app.label} />
+        <div className="w-full h-full flex items-center justify-center">
+            <img src={app.iconUrl} className="max-w-full max-h-full object-contain pointer-events-none" alt={app.label} />
+        </div>
       ) : (
-        <HelpCircle size={20} className="text-indigo-300" />
+        // Question mark icon if no icon found
+        <div className="w-full h-full bg-indigo-500/20 rounded-md flex items-center justify-center border border-indigo-400/30">
+            <span className="text-xs font-bold text-indigo-300">?</span>
+        </div>
       )
     }));
     return [...SYSTEM_APPS, ...dynamicApps];
@@ -341,20 +349,42 @@ const App: React.FC = () => {
   };
 
   const openApp = (id: AppId, data?: any) => {
+    let targetId = id;
+
+    if (id === AppId.BROWSER) {
+        // For browser, we always check if there is an existing one if user clicks "Browser"
+        // But if they clicked "New Window" (which calls openNewBrowserWindow), that logic passes a unique ID.
+        // If this call came from start menu/desktop, it uses generic ID.
+        // We want to reuse existing if available for generic click.
+        const existingBrowser = Object.values(windows).find(w => w.id.startsWith(AppId.BROWSER) && w.isOpen);
+        if (existingBrowser && !data?.forceNew) {
+             targetId = existingBrowser.id; // Focus existing
+        } else if (!data?.forceNew) {
+             targetId = `${AppId.BROWSER}-1`; // Create first instance
+        }
+        // If data.forceNew or unique ID passed (like browser-timestamp), we use that.
+        // But openApp receives ID. If ID is already unique, we use it.
+        // If ID is generic AppId.BROWSER, we do the check above.
+    }
+
     setWindows(prev => {
-      // Check if window exists
-      const existing = prev[id];
+      const existing = prev[targetId];
       const newState: WindowState = existing 
           ? { ...existing, isOpen: true, isMinimized: false, desktopId: currentDesktop, data: data !== undefined ? data : existing.data }
-          : { id, isOpen: true, isMinimized: false, zIndex: 1, position: { x: 100 + Math.random()*50, y: 100 + Math.random()*50 }, desktopId: currentDesktop, data };
+          : { id: targetId, isOpen: true, isMinimized: false, zIndex: 1, position: { x: 100 + Math.random()*50, y: 100 + Math.random()*50 }, desktopId: currentDesktop, data };
       
       return {
         ...prev,
-        [id]: newState
+        [targetId]: newState
       };
     });
-    bringToFront(id);
+    bringToFront(targetId);
     setIsStartMenuOpen(false);
+  };
+
+  const openNewBrowserWindow = (url?: string) => {
+      const newId = `${AppId.BROWSER}-${Date.now()}`;
+      openApp(newId, { initialUrl: url, forceNew: true });
   };
 
   const closeApp = (id: AppId) => {
@@ -388,6 +418,30 @@ const App: React.FC = () => {
   };
   
   const handleTaskbarAppClick = (id: AppId) => {
+    // Handling grouped browser instances
+    if (id === AppId.BROWSER) {
+        const browserWindows = Object.values(windows).filter(w => w.id.startsWith(AppId.BROWSER) && w.isOpen);
+        
+        if (browserWindows.length === 0) {
+            openApp(AppId.BROWSER);
+        } else if (browserWindows.length === 1) {
+            const w = browserWindows[0];
+            if (w.isMinimized || w.desktopId !== currentDesktop) {
+                 setWindows(prev => ({ ...prev, [w.id]: { ...prev[w.id], isMinimized: false, desktopId: currentDesktop } }));
+                 bringToFront(w.id);
+            } else if (activeApp === w.id) {
+                 minimizeApp(w.id);
+            } else {
+                 bringToFront(w.id);
+            }
+        } else {
+            // Multiple windows: If any is active, minimize all. If none active, show Task View or active last one.
+            // Simplified logic: Open Task View
+            setIsTaskViewOpen(true);
+        }
+        return;
+    }
+
     const w = windows[id];
     
     if (!w || !w.isOpen) {
@@ -584,8 +638,13 @@ const App: React.FC = () => {
   };
 
   const renderAppContent = (id: AppId, data?: any) => {
+    // Dynamic Browser ID Check
+    if (typeof id === 'string' && id.startsWith(AppId.BROWSER)) {
+        return <BrowserApp initialUrl={data?.initialUrl} onOpenNewWindow={openNewBrowserWindow} />;
+    }
+
     // Check if it's a third-party app
-    if (id.startsWith('third_party_')) {
+    if (typeof id === 'string' && id.startsWith('3rd_')) {
        const thirdPartyApp = thirdPartyApps.find(app => app.id === id);
        if (thirdPartyApp) {
            return <IframeApp src={thirdPartyApp.url} title={thirdPartyApp.label} />;
@@ -617,13 +676,15 @@ const App: React.FC = () => {
           onUpdateUser={setCurrentUser}
         />;
       case AppId.TASK_MANAGER:
-        // Task Manager is now completely decoupled
         return <TaskManagerApp />;
       default: return null;
     }
   };
 
   const getWindowTitle = (windowState: WindowState) => {
+    if (windowState.id.startsWith(AppId.BROWSER)) {
+        return 'Rakko Browser';
+    }
     if (windowState.id === AppId.PICTURE_VIEWER) {
       return `Picture Studio${windowState.data?.title ? ` - ${windowState.data.title}` : ''}`;
     }
@@ -637,81 +698,39 @@ const App: React.FC = () => {
   const renderContextMenu = () => {
     if (!activeContextMenu) return null;
 
-    let items: MenuItem[] = [];
+    if (activeContextMenu.type === 'desktop') return null;
 
-    if (activeContextMenu.type === 'desktop') {
-        return null;
-    }
+    let items: MenuItem[] = [];
 
     if (activeContextMenu.type === 'icon') {
         const item = activeContextMenu.data;
         items = [
-            { 
-                label: 'Open', 
-                icon: <Maximize2 size={14}/>, 
-                action: () => handleOpenItem(item) 
-            },
-            { separator: true } as MenuItem
+            { label: 'Open', action: () => handleOpenItem(item) },
+            { separator: true, label: '' },
+            { label: 'Rename', action: () => handleRenameIcon(item) },
+            { label: 'Delete', danger: true, action: () => handleDeleteIcon(item) }
         ];
-
-        if (item.type === 'app') {
-            const pinned = isAppPinned(item.id);
-            items.push({
-                label: pinned ? 'Unpin from Taskbar' : 'Pin to Taskbar',
-                icon: pinned ? <PinOff size={14}/> : <Pin size={14}/>,
-                action: () => togglePinApp(item.id)
-            });
-            items.push({ separator: true } as MenuItem);
-        }
-
-        if (item.type === 'file') {
-             items.push(
-                { label: 'Rename', icon: <Edit3 size={14}/>, action: () => handleRenameIcon(item) },
-                { label: 'Delete', icon: <Trash2 size={14}/>, danger: true, action: () => handleDeleteIcon(item) }
-             );
-        }
-    }
-
-    if (activeContextMenu.type === 'taskbar') {
-        const { id } = activeContextMenu.data;
-        const pinned = isAppPinned(id);
-        const isOpen = windows[id] && windows[id].isOpen;
+    } else if (activeContextMenu.type === 'taskbar') {
+        const appId = activeContextMenu.data?.id;
+        const w = windows[appId];
+        const isOpen = w?.isOpen;
         
         items = [
-            {
-                label: pinned ? 'Unpin from Taskbar' : 'Pin to Taskbar',
-                icon: pinned ? <PinOff size={14}/> : <Pin size={14}/>,
-                action: () => togglePinApp(id)
-            },
-            { separator: true } as MenuItem,
-            {
-                label: 'Close Window',
-                icon: <X size={14}/>,
-                disabled: !isOpen,
-                danger: true,
-                action: () => closeApp(id)
-            }
+            { label: 'Open', action: () => handleTaskbarAppClick(appId) },
+            { label: 'Close window', disabled: !isOpen, danger: true, action: () => closeApp(appId) },
+            { separator: true, label: '' },
+            { label: isAppPinned(appId) ? 'Unpin from taskbar' : 'Pin to taskbar', action: () => togglePinApp(appId) }
+        ];
+    } else if (activeContextMenu.type === 'start') {
+        const appId = activeContextMenu.data?.id;
+        items = [
+            { label: 'Open', action: () => openApp(appId) },
+            { separator: true, label: '' },
+            { label: isAppPinned(appId) ? 'Unpin from taskbar' : 'Pin to taskbar', action: () => togglePinApp(appId) }
         ];
     }
 
-    if (activeContextMenu.type === 'start') {
-        const { id } = activeContextMenu.data;
-        const pinned = isAppPinned(id);
-        
-        items = [
-             {
-                label: 'Open',
-                icon: <Maximize2 size={14}/>,
-                action: () => openApp(id)
-            },
-            { separator: true } as MenuItem,
-            {
-                label: pinned ? 'Unpin from Taskbar' : 'Pin to Taskbar',
-                icon: pinned ? <PinOff size={14}/> : <Pin size={14}/>,
-                action: () => togglePinApp(id)
-            }
-        ];
-    }
+    if (items.length === 0) return null;
 
     return (
         <ContextMenu
@@ -839,6 +858,8 @@ const App: React.FC = () => {
       {/* Windows Layer */}
       {(Object.values(windows) as WindowState[]).map(windowState => {
           const isOnCurrentDesktop = windowState.desktopId === currentDesktop;
+          const isBrowser = windowState.id.startsWith(AppId.BROWSER);
+
           return (
             <div key={windowState.id} style={{ display: isOnCurrentDesktop ? 'block' : 'none' }}>
                 <Window
@@ -848,14 +869,16 @@ const App: React.FC = () => {
                 isMinimized={windowState.isMinimized}
                 zIndex={windowState.zIndex}
                 isActive={activeApp === windowState.id}
+                variant={isBrowser ? 'frameless' : 'default'}
                 onClose={closeApp}
                 onMinimize={minimizeApp}
                 onFocus={bringToFront}
                 onUpdatePreview={handleUpdatePreview}
                 initialSize={
                   windowState.id === AppId.PICTURE_VIEWER ? { width: 900, height: 650 } : 
+                  (isBrowser ? { width: 1024, height: 700 } :
                   (windowState.id === AppId.CHAT ? { width: 400, height: 600 } : 
-                  (windowState.id === AppId.TASK_MANAGER ? { width: 800, height: 600 } : undefined))
+                  (windowState.id === AppId.TASK_MANAGER ? { width: 800, height: 600 } : undefined)))
                 }
                 >
                 {renderAppContent(windowState.id, windowState.data)}

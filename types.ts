@@ -11,7 +11,8 @@ export const AppId = {
   CONTROL_PANEL: 'control_panel',
   TEXT_EDITOR: 'text_editor',
   HELP: 'help',
-  TASK_MANAGER: 'task_manager'
+  TASK_MANAGER: 'task_manager',
+  BROWSER: 'browser'
 } as const;
 
 export type AppId = typeof AppId[keyof typeof AppId] | string;

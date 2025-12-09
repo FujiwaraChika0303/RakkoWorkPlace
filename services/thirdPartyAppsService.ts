@@ -8,60 +8,72 @@ export interface ThirdPartyAppDefinition {
   iconUrl?: string;
 }
 
-export const loadThirdPartyApps = (): ThirdPartyAppDefinition[] => {
+/**
+ * Scans the /ThirdApps directory for valid applications.
+ * Rule: A valid app must have an index.html inside a subdirectory.
+ * Example: /ThirdApps/MyGame/index.html
+ */
+export const scanThirdPartyApps = (): ThirdPartyAppDefinition[] => {
   const apps: ThirdPartyAppDefinition[] = [];
   const meta = import.meta as any;
 
-  // Strategy 1: Vite import.meta.glob (Build time / Vite Dev Server)
-  // We check if the function exists to avoid runtime errors in other environments
-  if (typeof meta.glob === 'function') {
-      try {
-        const htmlModules = meta.glob('/ThirdApps/*/index.html', { 
-            query: '?url', 
-            import: 'default', 
-            eager: true 
-        });
-
-        const iconModules = meta.glob('/ThirdApps/*/*.{png,svg,jpg,jpeg,webp,ico}', { 
-            query: '?url', 
-            import: 'default', 
-            eager: true 
-        });
-
-        for (const path in htmlModules) {
-            const parts = path.split('/');
-            // Expected path: /ThirdApps/[AppName]/index.html
-            if (parts.length < 3) continue;
-            
-            // Extract folder name (App Name)
-            const folderName = parts[2]; 
-            const id = `third_party_${folderName}`;
-            const url = htmlModules[path] as string;
-
-            // Find matching icon
-            const iconKey = Object.keys(iconModules).find(key => key.includes(`/ThirdApps/${folderName}/`));
-            const iconUrl = iconKey ? (iconModules[iconKey] as string) : undefined;
-
-            apps.push({ id, label: folderName, url, iconUrl });
-        }
-        return apps;
-      } catch (e) {
-          console.warn("Auto-scan via glob failed:", e);
-      }
+  // Check if we are in a Vite environment supporting glob import
+  if (typeof meta.glob !== 'function') {
+    console.warn('System: Auto-scan for ThirdPartyApps skipped (import.meta.glob not supported).');
+    return [];
   }
 
-  // Strategy 2: Fallback for environments without glob support (e.g. Runtime Browser)
-  // Since we cannot scan the filesystem dynamically in a standard browser runtime without a build step,
-  // we fallback to manually registering the 'RTest' app which we know exists.
-  // In a real production environment without Vite, you would fetch a 'manifest.json' here.
-  
-  console.log("Using fallback app list (import.meta.glob not available)");
-  apps.push({
-      id: 'third_party_RTest',
-      label: 'RTest',
-      url: '/ThirdApps/RTest/index.html',
-      iconUrl: undefined // Use default '?' icon
-  });
+  try {
+    // 1. Scan for all index.html files (The entry points)
+    // eager: true ensures we get the module/URL immediately without a promise
+    const htmlModules = meta.glob('/ThirdApps/*/index.html', { 
+        query: '?url', 
+        import: 'default', 
+        eager: true 
+    });
+
+    // 2. Scan for all potential icons (png, jpg, svg, etc.)
+    const iconModules = meta.glob('/ThirdApps/*/*.{png,jpg,jpeg,svg,webp,ico}', { 
+        query: '?url', 
+        import: 'default', 
+        eager: true 
+    });
+
+    // 3. Process each found app
+    for (const path in htmlModules) {
+        // Path format: /ThirdApps/[AppName]/index.html
+        const parts = path.split('/');
+        
+        // Safety check for folder structure
+        if (parts.length < 3) continue;
+        
+        const folderName = parts[2]; // e.g., "RTest"
+        const appName = decodeURIComponent(folderName); // Support URL encoded names
+        
+        // Create a unique internal ID
+        const id = `3rd_party_${folderName}`;
+        
+        // Get the actual URL for the iframe
+        const appUrl = htmlModules[path] as string;
+
+        // Try to find a matching icon in the same folder
+        // We look for any icon file path that contains the app's folder path
+        const iconKey = Object.keys(iconModules).find(key => key.includes(`/ThirdApps/${folderName}/`));
+        const iconUrl = iconKey ? (iconModules[iconKey] as string) : undefined;
+
+        apps.push({
+            id,
+            label: appName,
+            url: appUrl,
+            iconUrl
+        });
+    }
+
+    console.log(`[System] Discovered ${apps.length} third-party apps.`);
+    
+  } catch (error) {
+    console.error('[System] Failed to scan third-party apps:', error);
+  }
 
   return apps;
 };

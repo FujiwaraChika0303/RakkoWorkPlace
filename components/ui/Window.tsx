@@ -13,6 +13,7 @@ interface WindowProps {
   isActive?: boolean;
   initialPosition?: { x: number; y: number };
   initialSize?: { width: number; height: number };
+  variant?: 'default' | 'frameless';
   onClose: (id: AppId) => void;
   onMinimize: (id: AppId) => void;
   onFocus: (id: AppId) => void;
@@ -29,6 +30,7 @@ export const Window: React.FC<WindowProps> = ({
   isActive = false,
   initialPosition = { x: 100, y: 100 },
   initialSize = { width: 600, height: 400 },
+  variant = 'default',
   onClose,
   onMinimize,
   onFocus,
@@ -58,7 +60,6 @@ export const Window: React.FC<WindowProps> = ({
   const lastCaptureTime = useRef(0);
 
   // --- Process Registration ---
-  // Pass isRendered as the 'active' flag. Process disappears when window fully closes.
   useSystemProcess({
     id: `app:${id}`,
     name: title,
@@ -84,6 +85,7 @@ export const Window: React.FC<WindowProps> = ({
     }
   }, [isOpen]);
 
+  // Initial Random Position
   useEffect(() => {
     if (isOpen && initialPosition.x === 100 && initialPosition.y === 100) {
       const x = Math.max(0, window.innerWidth / 2 - initialSize.width / 2 + (Math.random() * 40 - 20));
@@ -135,10 +137,33 @@ export const Window: React.FC<WindowProps> = ({
   }, [isActive]);
 
   const handleMouseDown = (e: React.MouseEvent) => {
-    if (isMaximized) return;
+    // Bring to front
     onFocus(id);
-    if ((e.target as HTMLElement).closest('.window-controls')) return;
+
+    // Prevent drag if maximized
+    if (isMaximized) return;
+
+    // Smart Drag Logic:
+    // If clicking a button, input, or explicitly marked "no-drag" area, don't drag window.
+    // Otherwise, drag.
+    const target = e.target as HTMLElement;
+    if (
+        target.closest('button') || 
+        target.closest('input') || 
+        target.closest('.no-drag') ||
+        target.closest('.window-controls') ||
+        target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA'
+    ) {
+        return;
+    }
     
+    // Only allow drag from specific areas if variant is default (header)
+    // If variant is frameless, we allow drag from anywhere that wasn't excluded above
+    if (variant === 'default' && !target.closest('.window-header')) {
+        return;
+    }
+
     setIsDragging(true);
     dragStartMouse.current = { x: e.clientX, y: e.clientY };
     dragStartPos.current = { ...position };
@@ -239,6 +264,30 @@ export const Window: React.FC<WindowProps> = ({
     ? 'transition-none' 
     : 'transition-[width,height,transform,opacity,filter] duration-500 cubic-bezier(0.2, 0.8, 0.2, 1)';
 
+  // Controls Component for re-use
+  const WindowControls = ({ overlay = false }) => (
+    <div className={`flex items-center gap-2 window-controls ${overlay ? 'absolute top-0 right-0 p-2 z-50' : ''}`}>
+        <button
+        onClick={handleMinimize}
+        className={`p-1 rounded-md transition-colors ${overlay ? 'hover:bg-white/10 text-gray-400 hover:text-white' : 'hover:bg-white/10 text-gray-400 hover:text-white'}`}
+        >
+        <Minus size={14} />
+        </button>
+        <button
+        onClick={(e) => { e.stopPropagation(); toggleMaximize(); }}
+        className={`p-1 rounded-md transition-colors ${overlay ? 'hover:bg-white/10 text-gray-400 hover:text-white' : 'hover:bg-white/10 text-gray-400 hover:text-white'}`}
+        >
+        {isMaximized ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+        </button>
+        <button
+        onClick={(e) => { e.stopPropagation(); onClose(id); }}
+        className={`p-1 rounded-md transition-colors ${overlay ? 'hover:bg-red-500 text-gray-400 hover:text-white' : 'hover:bg-red-500/20 text-gray-400 hover:text-red-400'}`}
+        >
+        <X size={14} />
+        </button>
+    </div>
+  );
+
   return (
     <div
       ref={windowRef}
@@ -259,60 +308,49 @@ export const Window: React.FC<WindowProps> = ({
         ${transitionClass}
         ${isActive ? 'border border-indigo-500/50 shadow-indigo-500/10' : 'border border-white/10 shadow-black/50'}
       `}
-      onMouseDown={() => onFocus(id)}
+      onMouseDown={handleMouseDown}
     >
-      <div
-        className={`
-          h-10 bg-gradient-to-r flex items-center justify-between px-3 
-          select-none border-b shrink-0 transition-colors duration-300
-          ${isActive ? 'from-gray-900 to-indigo-950/30 border-white/10' : 'from-gray-900 to-black/80 border-white/5'}
-          ${isMaximized ? 'cursor-default' : 'cursor-move'}
-        `}
-        onMouseDown={handleMouseDown}
-        onDoubleClick={toggleMaximize}
-      >
-        <span className={`font-serif text-sm tracking-wider flex items-center gap-2 transition-colors ${isActive ? 'text-gray-100' : 'text-gray-400'}`}>
-          <div className={`w-2 h-2 rounded-full ${isActive ? 'bg-indigo-500 animate-pulse' : 'bg-gray-600'}`} />
-          {title}
-        </span>
-        <div className="flex items-center gap-2 window-controls">
-          <button
-            onClick={handleMinimize}
-            className="p-1 hover:bg-white/10 rounded-md text-gray-400 hover:text-white transition-colors"
+      {/* Default Header */}
+      {variant === 'default' && (
+          <div
+            className={`
+              window-header h-10 bg-gradient-to-r flex items-center justify-between px-3 
+              select-none border-b shrink-0 transition-colors duration-300
+              ${isActive ? 'from-gray-900 to-indigo-950/30 border-white/10' : 'from-gray-900 to-black/80 border-white/5'}
+              ${isMaximized ? 'cursor-default' : 'cursor-move'}
+            `}
+            onDoubleClick={toggleMaximize}
           >
-            <Minus size={14} />
-          </button>
-          <button
-            onClick={(e) => { e.stopPropagation(); toggleMaximize(); }}
-            className="p-1 hover:bg-white/10 rounded-md text-gray-400 hover:text-white transition-colors"
-          >
-            {isMaximized ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-          </button>
-          <button
-            onClick={(e) => { e.stopPropagation(); onClose(id); }}
-            className="p-1 hover:bg-red-500/20 rounded-md text-gray-400 hover:text-red-400 transition-colors"
-          >
-            <X size={14} />
-          </button>
-        </div>
-      </div>
+            <span className={`font-serif text-sm tracking-wider flex items-center gap-2 transition-colors ${isActive ? 'text-gray-100' : 'text-gray-400'}`}>
+              <div className={`w-2 h-2 rounded-full ${isActive ? 'bg-indigo-500 animate-pulse' : 'bg-gray-600'}`} />
+              {title}
+            </span>
+            <WindowControls />
+          </div>
+      )}
 
-      <div className="flex-1 overflow-auto bg-black/40 text-gray-200 p-1 relative">
+      {/* Frameless Header Controls Overlay */}
+      {variant === 'frameless' && (
+          <WindowControls overlay />
+      )}
+
+      {/* Content */}
+      <div className={`flex-1 overflow-auto bg-black/40 text-gray-200 relative ${variant === 'default' ? 'p-1' : ''}`}>
         {children}
       </div>
 
       {!isMaximized && (
         <div className="no-capture">
           <div 
-            className="absolute right-0 top-0 bottom-4 w-1.5 cursor-e-resize hover:bg-white/10 transition-colors z-50"
+            className="absolute right-0 top-0 bottom-4 w-1.5 cursor-e-resize hover:bg-white/10 transition-colors z-50 no-drag"
             onMouseDown={startResize('e')}
           />
           <div 
-            className="absolute left-0 bottom-0 right-4 h-1.5 cursor-s-resize hover:bg-white/10 transition-colors z-50"
+            className="absolute left-0 bottom-0 right-4 h-1.5 cursor-s-resize hover:bg-white/10 transition-colors z-50 no-drag"
             onMouseDown={startResize('s')}
           />
           <div 
-            className="absolute right-0 bottom-0 w-4 h-4 cursor-se-resize hover:bg-white/20 transition-colors z-50 rounded-tl-lg"
+            className="absolute right-0 bottom-0 w-4 h-4 cursor-se-resize hover:bg-white/20 transition-colors z-50 rounded-tl-lg no-drag"
             onMouseDown={startResize('se')}
           />
         </div>
